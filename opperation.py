@@ -34,3 +34,28 @@ def execute_query(query):
             connection.close()
     else:
         return None
+
+def login(username, password):
+    query = (f"SELECT * FROM users WHERE username='{username}' AND password='{password}'")
+    result = execute_query(query)
+    try:
+        if len(result) > 0:
+            return True
+        else:
+            raise Exception("Invalid credentials")
+    except Exception as e:
+        print(f"Error: {e}")
+        return False
+
+def register(username, password):
+    query = (f"INSERT INTO users (username, password) VALUES ('{username}', '{password}')")
+    result = execute_query(query)
+    try:
+        if result is not None:
+            return True
+        else:
+            raise Exception("Error registering user")
+    except Exception as e:
+        print(f"Error: {e}")
+        return False
+    
