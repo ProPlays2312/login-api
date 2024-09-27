@@ -33,10 +33,30 @@ def execute_query(query):
         finally:
             connection.close()
     else:
+        raise Exception("Error connecting to database")
+
+def not_null(value):
+    try:
+        if value is not None:
+            return value
+        else:
+            raise Exception("Value is null")
+    except Exception as e:
+        print(f"Error: {e}")
         return None
 
-def login(username, password):
-    query = (f"SELECT * FROM users WHERE username='{username}' AND password='{password}'")
+def is_email(email):
+    try:
+        if "@" in email:
+            return email
+        else:
+            return None
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+def auth_user(login, password):
+    query = (f"SELECT * FROM users WHERE username='{login}' OR email='{login}' AND password='{password}'")
     result = execute_query(query)
     try:
         if len(result) > 0:
@@ -47,10 +67,13 @@ def login(username, password):
         print(f"Error: {e}")
         return False
 
-def register(username, password):
-    query = (f"INSERT INTO users (username, password) VALUES ('{username}', '{password}')")
-    result = execute_query(query)
+def register(data):
+    username = not_null(data.get("username"))
+    password = not_null(data.get("password"))
+    email = not_null(data.get("email"))
+    query = (f"INSERT INTO users (username, password, email) VALUES ('{username}', '{password}', '{email}')")
     try:
+        result = execute_query(query)
         if result is not None:
             return True
         else:
@@ -59,3 +82,14 @@ def register(username, password):
         print(f"Error: {e}")
         return False
     
+def get_users():
+    query = "SELECT uid, username, email FROM users"
+    result = execute_query(query)
+    try:
+        if result is not None:
+            return result
+        else:
+            raise Exception("Error getting users")
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
