@@ -1,6 +1,10 @@
 import pymysql
 import os
 from dotenv import load_dotenv
+from datetime import datetime
+from flask import jsonify
+import jwt
+from datetime import timedelta
 
 load_dotenv(dotenv_path=".env")
 
@@ -55,6 +59,10 @@ def is_email(email):
         print(f"Error: {e}")
         return None
 
+def create_jwt(data):
+    # Create a JWT token
+    pass
+
 def auth_user(login, password):
     query = (f"SELECT * FROM users WHERE username='{login}' OR email='{login}' AND password='{password}'")
     result = execute_query(query)
@@ -71,7 +79,9 @@ def register(data):
     username = not_null(data.get("username"))
     password = not_null(data.get("password"))
     email = not_null(data.get("email"))
-    query = (f"INSERT INTO users (username, password, email) VALUES ('{username}', '{password}', '{email}')")
+    c_date = datetime.now().strftime("%Y-%m-%d")
+    jwt = create_jwt({"username": username, "email": email})
+    query = (f"INSERT INTO users (username, password, email, c_date, jwt) VALUES ('{username}', '{password}', '{email}', '{c_date}', '{jwt}')")
     try:
         result = execute_query(query)
         if result is not None:
@@ -82,8 +92,11 @@ def register(data):
         print(f"Error: {e}")
         return False
     
-def get_users():
-    query = "SELECT uid, username, email FROM users"
+def get_users(id):
+    if id is not None:
+        query = f"SELECT uid, username, email FROM users WHERE uid={id}"
+    else:
+        query = "SELECT uid, username, email FROM users"
     result = execute_query(query)
     try:
         if result is not None:
@@ -93,3 +106,10 @@ def get_users():
     except Exception as e:
         print(f"Error: {e}")
         return None
+    
+data={"username": "admin", "password": "password@123", "email": "admin@local.co"}
+try:
+    create_jwt(data)
+except Exception as e:
+    print(f"Error: {e}")
+    pass
