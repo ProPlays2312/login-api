@@ -43,8 +43,9 @@ def register(data):
     password = not_null(data.get("password"))
     email = not_null(data.get("email"))
     c_date = datetime.now().strftime("%Y-%m-%d")
-    jwt = create_jwt({"username": username, "email": email})
-    query = (f"INSERT INTO users (username, password, email, c_date, jwt) VALUES ('{username}', '{password}', '{email}', '{c_date}', '{jwt}')")
+    token = "TODO: Generate token"
+    query = (f"INSERT INTO users (username, password, email, c_date, jwt) VALUES ('{username}', '{password}', '{email}', '{c_date}')")
+    query2 = "TODO: Insert token"
     try:
         result = execute_query(query)
         if result is not None:
