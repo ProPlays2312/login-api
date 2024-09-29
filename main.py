@@ -1,14 +1,24 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session, sessions
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
 from opperation import get_users, register, auth_user
-import json
-import jwt
+from api.session import generate_token, session_token, verify_token
 
 load_dotenv(dotenv_path=".env")
 
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY")
+app.config["SESSION_TYPE"] = "filesystem"
+app.config["SESSION_PERMANENT"] = False
+app.config["SESSION_USE_SIGNER"] = True
+app.config["SESSION_KEY_PREFIX"] = "token"
+app.config["PERMANENT_SESSION_LIFETIME"] = os.getenv("TOKEN_EXPIRATION")
+app.config["SESSION_COOKIE_NAME"] = "token"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+CORS(app)
 
 @app.route("/api/users", methods=["GET"])
 def users():
@@ -46,13 +56,17 @@ def login():
     try:
         result = auth_user(data["login"], data["password"])
         if result is not None:
-            token = jwt.encode({"user": result["id"]}, "secret",
-                                 algorithm="HS256")
-            return jsonify({"token": token})
+            pass
         else:
             return jsonify({"message": "User not found"}), 404
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
+    uid = get_users(result["user"])[0]["id"]
+    user = get_users(result["user"])[0]["user"]
+    token = generate_token({"user": user, "uid": uid})
+    session["token"] = session_token(token)
+    return jsonify({"message": "Login successful"})
+
 
 if __name__ == "__main__":
     app.run(debug=os.getenv("SERVER_DEBUG"), host=os.getenv("SERVER_HOST"), port=os.getenv("SERVER_PORT"))

@@ -2,42 +2,9 @@ import pymysql
 import os
 from dotenv import load_dotenv
 from datetime import datetime
-from flask import jsonify
-import jwt
-from datetime import timedelta
+from api.db import execute_query
 
 load_dotenv(dotenv_path=".env")
-
-def get_connection():
-    try:
-        connection = pymysql.connect(
-            host=os.getenv("DB_HOST"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            database=os.getenv("DB_NAME"),
-            cursorclass=pymysql.cursors.DictCursor
-        )
-        return connection
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-
-def execute_query(query):
-    connection = get_connection()
-    if connection is not None:
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute(query)
-                result = cursor.fetchall()
-                connection.commit()
-                return result
-        except Exception as e:
-            print(f"Error: {e}")
-            return None
-        finally:
-            connection.close()
-    else:
-        raise Exception("Error connecting to database")
 
 def not_null(value):
     try:
@@ -58,10 +25,6 @@ def is_email(email):
     except Exception as e:
         print(f"Error: {e}")
         return None
-
-def create_jwt(data):
-    # Create a JWT token
-    pass
 
 def auth_user(login, password):
     query = (f"SELECT * FROM users WHERE username='{login}' OR email='{login}' AND password='{password}'")
@@ -93,10 +56,14 @@ def register(data):
         return False
     
 def get_users(id):
-    if id is not None:
+    if id is int:
         query = f"SELECT uid, username, email FROM users WHERE uid={id}"
-    else:
+    if id is None:
         query = "SELECT uid, username, email FROM users"
+    if id is str:
+        query = f"SELECT uid, username, email FROM users WHERE username='{id}' OR email='{id}'"
+    else:
+        raise Exception("Invalid id")
     result = execute_query(query)
     try:
         if result is not None:
@@ -107,9 +74,3 @@ def get_users(id):
         print(f"Error: {e}")
         return None
     
-data={"username": "admin", "password": "password@123", "email": "admin@local.co"}
-try:
-    create_jwt(data)
-except Exception as e:
-    print(f"Error: {e}")
-    pass
