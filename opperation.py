@@ -1,30 +1,10 @@
-import pymysql
-import os
 from dotenv import load_dotenv
 from datetime import datetime
 from api.db import execute_query
+from api.utils import not_null
+from api.token import generate_token
 
 load_dotenv(dotenv_path=".env")
-
-def not_null(value):
-    try:
-        if value is not None:
-            return value
-        else:
-            raise Exception("Value is null")
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-
-def is_email(email):
-    try:
-        if "@" in email:
-            return email
-        else:
-            return None
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
 
 def auth_user(login, password):
     query = (f"SELECT * FROM users WHERE username='{login}' OR email='{login}' AND password='{password}'")
@@ -43,12 +23,13 @@ def register(data):
     password = not_null(data.get("password"))
     email = not_null(data.get("email"))
     c_date = datetime.now().strftime("%Y-%m-%d")
-    token = "TODO: Generate token"
+    token = generate_token(data)
     query = (f"INSERT INTO users (username, password, email, c_date, jwt) VALUES ('{username}', '{password}', '{email}', '{c_date}')")
-    query2 = "TODO: Insert token"
+    query2 = f"INSERT INTO tokens (uid, token) VALUES ((SELECT uid FROM users WHERE username='{username}'), '{token}')"
     try:
         result = execute_query(query)
-        if result is not None:
+        result2 = execute_query(query2)
+        if result and result2 is not None:
             return True
         else:
             raise Exception("Error registering user")
@@ -64,7 +45,7 @@ def get_users(id):
     if id is str:
         query = f"SELECT uid, username, email FROM users WHERE username='{id}' OR email='{id}'"
     else:
-        raise Exception("Invalid id")
+        raise Exception("Invalid Request")
     result = execute_query(query)
     try:
         if result is not None:

@@ -3,35 +3,44 @@ from flask_cors import CORS
 import os
 from dotenv import load_dotenv
 from opperation import get_users, register, auth_user
-from api.session import generate_token, session_token, verify_token
+from api.token import generate_token, session_token
 
 load_dotenv(dotenv_path=".env")
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY")
-app.config["SESSION_TYPE"] = "filesystem"
-app.config["SESSION_PERMANENT"] = False
-app.config["SESSION_USE_SIGNER"] = True
-app.config["SESSION_KEY_PREFIX"] = "token"
-app.config["PERMANENT_SESSION_LIFETIME"] = os.getenv("TOKEN_EXPIRATION")
-app.config["SESSION_COOKIE_NAME"] = "token"
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SECURE"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
-CORS(app)
 
 @app.route("/api/users", methods=["GET"])
 def users():
-    result = get_users()
-    return jsonify(result)
+    try:
+        users = get_users(None)
+        if users is not None:
+            return jsonify(users)
+        else:
+            return jsonify({"message": "Error getting users"}), 500
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
 
 @app.route("/api/users/<int:id>", methods=["GET"])
 def users_id(id):
-    user = get_users(id)
-    if user is not None:
-        return jsonify(user)
-    else:
-        return jsonify({"message": "User not found"}), 404
+    try:
+        user = get_users(id)
+        if user is not None:
+            return jsonify(user)
+        else:
+            return jsonify({"message": "User not found"}), 404
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+@app.route("/api/users/<string:id>", methods=["GET"])
+def username(id):
+    try:
+        user = get_users(id)
+        if user is not None:
+            return jsonify(user)
+        else:
+            return jsonify({"message": "User not found"}), 404
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
 
 @app.route("/api/register", methods=["POST"])
 def create_user():
@@ -61,11 +70,14 @@ def login():
             return jsonify({"message": "User not found"}), 404
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
-    uid = get_users(result["user"])[0]["id"]
-    user = get_users(result["user"])[0]["user"]
-    token = generate_token({"user": user, "uid": uid})
-    session["token"] = session_token(token)
-    return jsonify({"message": "Login successful"})
+    try:
+        uid = get_users(result["user"])[0]["id"]
+        user = get_users(result["user"])[0]["user"]
+        token = generate_token({"user": user, "uid": uid})
+        session["token"] = session_token(token)
+        return jsonify({"message": "Login successful"})
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
 
 
 if __name__ == "__main__":
