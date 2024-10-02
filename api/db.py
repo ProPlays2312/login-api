@@ -1,4 +1,5 @@
 # Description: This file contains the database connection function.
+
 import pymysql
 import os
 from dotenv import load_dotenv

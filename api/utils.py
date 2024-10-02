@@ -7,15 +7,13 @@ def not_null(value):
         else:
             raise Exception("Value is null")
     except Exception as e:
-        print(f"Error: {e}")
-        return None
+        return f"Error: {e}"
 
 def is_email(email):
     try:
-        if "@" in email:
+        if "@" and "." in email:
             return email
         else:
-            return None
+            raise Exception("Malformed email")
     except Exception as e:
-        print(f"Error: {e}")
-        return None
+        return f"Error: {e}"

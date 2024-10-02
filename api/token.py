@@ -1,4 +1,5 @@
 # Description: This file contains the functions to generate and verify the session token.
+
 from dotenv import load_dotenv
 import os
 import time
