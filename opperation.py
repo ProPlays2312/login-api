@@ -49,7 +49,7 @@ def get_users(data):
     try:
         result = execute_query(query)
         if len(result) == 0:
-            raise Exception("User not found")
+            return None
         else:
             return result
     except Exception as e:

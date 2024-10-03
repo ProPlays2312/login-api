@@ -34,7 +34,7 @@ def users_id(uid):
         if user is not None:
             return jsonify(user)
         else:
-            return jsonify({"message": "User not found"}), 404
+            return jsonify({"message": "Error: User not found"}), 404
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
 
@@ -45,7 +45,7 @@ def username(id):
         if user is not None:
             return jsonify(user)
         else:
-            return jsonify({"message": "User not found"}), 404
+            return jsonify({"message": "Error: User not found"}), 404
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
 
