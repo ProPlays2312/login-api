@@ -16,8 +16,7 @@ def auth_user(login, password):
         else:
             raise Exception("Invalid credentials")
     except Exception as e:
-        print(f"Error: {e}")
-        return False
+        return f"Error: {e}"
 
 def register(data):
     username = not_null(data.get("username"))
@@ -40,22 +39,18 @@ def register(data):
         print(f"Error: {e}")
         return False
     
-def get_users(id):
-    if id is int:
-        query = f"SELECT uid, username, email FROM users WHERE uid={id}"
-    if id is None:
+def get_users(data):
+    if isinstance(data, int):
+        query = f"SELECT uid, username, email FROM users WHERE uid={data}"
+    if data is None:
         query = "SELECT uid, username, email FROM users"
-    if id is str:
-        query = f"SELECT uid, username, email FROM users WHERE username='{id}' OR email='{id}'"
-    else:
-        raise Exception("Invalid Request")
-    result = execute_query(query)
+    if isinstance(data, str):
+        query = f"SELECT uid, username, email FROM users WHERE username='{data}' OR email='{data}'"
     try:
-        if result is not None:
-            return result
+        result = execute_query(query)
+        if len(result) == 0:
+            raise Exception("User not found")
         else:
-            raise Exception("Error getting users")
+            return result
     except Exception as e:
-        print(f"Error: {e}")
-        return None
-    
+        return f"Error: {e}"

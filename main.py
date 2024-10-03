@@ -1,16 +1,20 @@
 from flask import Flask, request, jsonify, session, sessions
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import os
 from dotenv import load_dotenv
 
 from opperation import get_users, register, auth_user
 from api.token import generate_token, session_token
-# from api.headers import set_headers
+from api.headers import set_headers
 # from api.config import Config
 
 load_dotenv(dotenv_path=".env")
 
 app = Flask(__name__)
+
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+cross_origin(f"{os.getenv("SERVER_HOST")}:{str(os.getenv("SERVER_PORT"))}", supports_credentials=True)
 
 @app.route("/api/users", methods=["GET"])
 def users():
@@ -23,10 +27,10 @@ def users():
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
 
-@app.route("/api/users/<int:id>", methods=["GET"])
-def users_id(id):
+@app.route("/api/users/<int:uid>", methods=["GET"])
+def users_id(uid):
     try:
-        user = get_users(id)
+        user = get_users(uid)
         if user is not None:
             return jsonify(user)
         else:
@@ -81,7 +85,6 @@ def login():
         return jsonify({"message": "Login successful"})
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
-
 
 if __name__ == "__main__":
     app.run(debug=os.getenv("SERVER_DEBUG"), host=os.getenv("SERVER_HOST"), port=os.getenv("SERVER_PORT"))
