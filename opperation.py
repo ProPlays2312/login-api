@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from datetime import datetime
+
 from api.db import execute_query
 from api.utils import not_null
 from api.token import generate_token
@@ -23,9 +24,11 @@ def register(data):
     password = not_null(data.get("password"))
     email = not_null(data.get("email"))
     c_date = datetime.now().strftime("%Y-%m-%d")
-    token = generate_token(data)
-    query = (f"INSERT INTO users (username, password, email, c_date, jwt) VALUES ('{username}', '{password}', '{email}', '{c_date}')")
-    query2 = f"INSERT INTO tokens (uid, token) VALUES ((SELECT uid FROM users WHERE username='{username}'), '{token}')"
+    data = generate_token(data["username"], data["uid"])
+    token = data[0]
+    c_date = data[1]
+    query = f"INSERT INTO users (username, password, email, c_date) VALUES ('{username}', '{password}', '{email}', '{c_date}')"
+    query2 = f"INSERT INTO tokens (uid, md5, cr_date) VALUES ({data.get('uid')}, '{token}', '{c_date}')"
     try:
         result = execute_query(query)
         result2 = execute_query(query2)
