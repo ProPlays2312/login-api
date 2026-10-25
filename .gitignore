@@ -1,6 +1,9 @@
 /.idx
 /.venv
-/__pycache__
+__pycache__/
+*.py[cod]
+*$py.class
 /.vscode
 .env
 ca.pem
+.pytest_cache/
