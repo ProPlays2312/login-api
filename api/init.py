@@ -1,6 +1,6 @@
 #Description: 
 
-from db import get_connection, execute_query
+from api.db import get_connection, execute_query
 
 def create_tables():
     query = """
