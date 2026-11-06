@@ -1,6 +1,11 @@
 def test_get_users_success(client, monkeypatch):
     mock_users = [{"uid": 1, "username": "alice", "email": "alice@example.com"}]
     monkeypatch.setattr("main.get_users", lambda uid: mock_users)
+    monkeypatch.setattr("main.verify_token", lambda token, data: True)
+    with client.session_transaction() as session:
+        session["token"] = "0" * 64 + ".9999999999"
+        session["username"] = "alice"
+        session["uid"] = 1
 
     response = client.get("/api/users")
     assert response.status_code == 200
@@ -55,6 +60,11 @@ def test_register_validation_error_is_client_error(client, monkeypatch):
 
 
 def test_internal_errors_do_not_leak_details(client, monkeypatch):
+    monkeypatch.setattr("main.verify_token", lambda token, data: True)
+    with client.session_transaction() as session:
+        session["token"] = "0" * 64 + ".9999999999"
+        session["username"] = "alice"
+        session["uid"] = 1
     monkeypatch.setattr(
         "main.get_users",
         lambda uid: (_ for _ in ()).throw(
@@ -65,3 +75,26 @@ def test_internal_errors_do_not_leak_details(client, monkeypatch):
     response = client.get("/api/users")
     assert response.status_code == 500
     assert response.get_json() == {"message": "Internal server error"}
+
+
+def test_users_requires_authentication(client):
+    response = client.get("/api/users")
+    assert response.status_code == 401
+
+
+def test_login_stores_verified_user_session(client, monkeypatch):
+    monkeypatch.setattr(
+        "main.auth_user",
+        lambda login, password: {"uid": 1, "username": "alice"},
+    )
+    monkeypatch.setattr("main.generate_token", lambda data: ("a" * 64, "today"))
+
+    response = client.post(
+        "/api/login",
+        json={"login": "alice", "password": "password"},
+    )
+
+    assert response.status_code == 200
+    with client.session_transaction() as session:
+        assert session["username"] == "alice"
+        assert session["uid"] == 1
