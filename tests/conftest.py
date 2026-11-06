@@ -4,6 +4,7 @@ import pytest
 # Ensure testing environment variables are configured before modules are loaded
 os.environ.setdefault("TOKEN_SECRET", "super-secret-test-token")
 os.environ.setdefault("TOKEN_EXPIRATION", "3600")
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
 os.environ.setdefault("SERVER_HOST", "127.0.0.1")
 os.environ.setdefault("SERVER_PORT", "5000")
 os.environ.setdefault("DB_HOST", "localhost")

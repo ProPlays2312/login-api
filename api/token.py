@@ -18,12 +18,14 @@ def generate_token(data):
     ).hexdigest()
     return token_digest, c_date
 
+
 def session_token(token_digest):
     expiration = int(time.time()) + int(os.getenv("TOKEN_EXPIRATION"))
     token = token_digest + "." + str(expiration)
     return token
-    
-def verify_token(token):
+
+
+def verify_token(token, data):
     try:
         token_digest, expiration = token.split(".", 1)
         if len(token_digest) != 64:
@@ -32,6 +34,9 @@ def verify_token(token):
         expiration = int(expiration)
     except (AttributeError, ValueError):
         return False
-    if expiration < int(time.time()):
+    expected_digest, _ = generate_token(data)
+    if expiration < int(time.time()) or not hmac.compare_digest(
+        token_digest, expected_digest
+    ):
         return False
     return True

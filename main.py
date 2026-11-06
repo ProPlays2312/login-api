@@ -1,17 +1,21 @@
 import logging
 import os
+from functools import wraps
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 
-from api.token import generate_token, session_token
+from api.token import generate_token, session_token, verify_token
 from opperation import auth_user, get_users, register
 
 load_dotenv(dotenv_path=".env")
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
+secret_key = os.getenv("SECRET_KEY")
+if not secret_key:
+    raise RuntimeError("SECRET_KEY must be configured")
+app.config["SECRET_KEY"] = secret_key
 
 CORS(
     app,
@@ -25,7 +29,26 @@ CORS(
 logger = logging.getLogger(__name__)
 
 
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        token = session.get("token")
+        user = {
+            "username": session.get("username"),
+            "uid": session.get("uid"),
+        }
+        if not token or not user["username"] or user["uid"] is None:
+            return jsonify({"message": "Authentication required"}), 401
+        if not verify_token(token, user):
+            session.clear()
+            return jsonify({"message": "Authentication required"}), 401
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
 @app.route("/api/users", methods=["GET"])
+@login_required
 def users():
     try:
         users = get_users(None)
@@ -96,6 +119,8 @@ def login():
             {"username": result["username"], "uid": result["uid"]}
         )
         session["token"] = session_token(token)
+        session["username"] = result["username"]
+        session["uid"] = result["uid"]
         return jsonify({"message": "Login successful"})
     except Exception:
         logger.exception("Failed to create login session")
