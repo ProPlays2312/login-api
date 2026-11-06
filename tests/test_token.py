@@ -6,7 +6,7 @@ def test_generate_token():
     user_data = {"username": "alice", "uid": 42}
     token, c_date = generate_token(user_data)
     assert isinstance(token, str)
-    assert len(token) == 32
+    assert len(token) == 64
     assert c_date == time.strftime("%Y-%m-%d")
 
 
