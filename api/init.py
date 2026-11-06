@@ -7,7 +7,7 @@ def create_tables():
     CREATE TABLE users (
         uid INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(50) NOT NULL,
-        password VARCHAR(50) NOT NULL,
+        password VARCHAR(255) NOT NULL,
         email VARCHAR(50) NOT NULL,
         c_date DATE NOT NULL
     );
@@ -25,5 +25,6 @@ def create_tables():
 def db_init():
     query = "SHOW TABLES;"
     result = execute_query(query)
-    if "users" or "tokens" not in result:
+    table_names = {row[0] for row in result}
+    if not {"users", "tokens"}.issubset(table_names):
         create_tables()

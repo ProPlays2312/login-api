@@ -11,14 +11,19 @@ def test_generate_token():
 
 
 def test_session_token_and_verify_valid():
-    md5_hash = "098f6bcd4621d373cade4e832627b4f6"
-    token = session_token(md5_hash)
-    assert token.startswith(md5_hash + ".")
+    token_digest = "0" * 64
+    token = session_token(token_digest)
+    assert token.startswith(token_digest + ".")
     assert verify_token(token) is True
 
 
 def test_verify_token_expired():
-    md5_hash = "098f6bcd4621d373cade4e832627b4f6"
+    token_digest = "0" * 64
     expired_timestamp = int(time.time()) - 3600
-    expired_token = f"{md5_hash}.{expired_timestamp}"
+    expired_token = f"{token_digest}.{expired_timestamp}"
     assert verify_token(expired_token) is False
+
+
+def test_verify_token_rejects_malformed_token():
+    assert verify_token("not-a-token") is False
+    assert verify_token("0" * 32 + ".9999999999") is False

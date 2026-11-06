@@ -37,3 +37,31 @@ def test_register_success(client, monkeypatch):
     response = client.post("/api/register", json=payload)
     assert response.status_code == 200
     assert response.get_json() is True
+
+
+def test_register_validation_error_is_client_error(client, monkeypatch):
+    monkeypatch.setattr(
+        "main.register",
+        lambda data: (_ for _ in ()).throw(
+            ValueError("username, password, and email are required")
+        ),
+    )
+
+    response = client.post("/api/register", json={})
+    assert response.status_code == 400
+    assert response.get_json()["message"] == (
+        "username, password, and email are required"
+    )
+
+
+def test_internal_errors_do_not_leak_details(client, monkeypatch):
+    monkeypatch.setattr(
+        "main.get_users",
+        lambda uid: (_ for _ in ()).throw(
+            RuntimeError("database password should not be exposed")
+        ),
+    )
+
+    response = client.get("/api/users")
+    assert response.status_code == 500
+    assert response.get_json() == {"message": "Internal server error"}
