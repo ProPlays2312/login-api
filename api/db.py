@@ -22,12 +22,12 @@ def get_connection():
         print(f"Error: {e}")
         return None
 
-def execute_query(query):
+def execute_query(query, params=None):
     connection = get_connection()
     if connection is not None:
         try:
             with connection.cursor() as cursor:
-                cursor.execute(query)
+                cursor.execute(query, params)
                 result = cursor.fetchall()
                 connection.commit()
                 return result

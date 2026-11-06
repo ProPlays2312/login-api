@@ -78,9 +78,7 @@ def login():
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
     try:
-        uid = get_users(result["user"])[0]["id"]
-        user = get_users(result["user"])[0]["user"]
-        token = generate_token({"user": user, "uid": uid})
+        token, _ = generate_token({"username": result["username"], "uid": result["uid"]})
         session["token"] = session_token(token)
         return jsonify({"message": "Login successful"})
     except Exception as e:
