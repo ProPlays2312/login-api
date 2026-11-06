@@ -18,15 +18,20 @@ def generate_token(data):
     ).hexdigest()
     return token_digest, c_date
 
-def session_token(md5sum):
+def session_token(token_digest):
     expiration = int(time.time()) + int(os.getenv("TOKEN_EXPIRATION"))
-    token = md5sum + "." + str(expiration)
+    token = token_digest + "." + str(expiration)
     return token
     
 def verify_token(token):
-    md5sum, expiration = token.split(".")
-    if int(expiration) < int(time.time()):
+    try:
+        token_digest, expiration = token.split(".", 1)
+        if len(token_digest) != 64:
+            return False
+        int(token_digest, 16)
+        expiration = int(expiration)
+    except (AttributeError, ValueError):
         return False
-    else:
-        return True
-    
+    if expiration < int(time.time()):
+        return False
+    return True
