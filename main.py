@@ -68,8 +68,8 @@ def create_user():
         return jsonify({"message": "Data is null"}), 400
     try:
         return jsonify(register(data))
-    except ValueError as error:
-        return jsonify({"message": str(error)}), 400
+    except ValueError:
+        return jsonify({"message": "username, password, and email are required"}), 400
     except Exception:
         logger.exception("Failed to register user")
         return jsonify({"message": "Internal server error"}), 500
