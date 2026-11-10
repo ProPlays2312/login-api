@@ -1,0 +1,480 @@
+openapi: 3.0.3
+info:
+  title: Vault Auth API
+  description: Authentication and user management backend service for Vault Auth.
+  version: 1.0.0
+servers:
+  - url: http://127.0.0.1:5000
+    description: Local development server
+tags:
+  - name: Authentication
+    description: User registration and login operations
+  - name: Users
+    description: User query operations
+
+paths:
+  /api/otp/send:
+    post:
+      tags:
+        - Authentication
+      summary: Send One-Time Password (OTP) for login
+      description: Generates a 6-digit numeric OTP for the matching user identifier and stores it with a 5-minute expiration.
+      operationId: sendOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpSendRequest'
+      responses:
+        '200':
+          description: OTP generated and sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtpSendResponse'
+        '400':
+          description: Missing identifier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/otp/verify:
+    post:
+      tags:
+        - Authentication
+      summary: Verify OTP and complete login
+      description: Validates the provided OTP code, marks it as used, and returns an authenticated session token.
+      operationId: verifyOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerifyRequest'
+      responses:
+        '200':
+          description: OTP valid and login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtpVerifyResponse'
+        '400':
+          description: Missing identifier or OTP code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid or expired OTP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register a new user
+      description: Registers a new user account and creates an initial authentication token.
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: boolean
+                example: true
+        '400':
+          description: Missing or invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: Data is null
+        '500':
+          description: Internal server or database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/login:
+    post:
+      tags:
+        - Authentication
+      summary: Authenticate user and receive session token
+      description: Validates user credentials, creates a timestamped session token, sets a session cookie, and returns the token in the response body.
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Missing payload or invalid JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: Data is null
+        '404':
+          description: Invalid credentials or user not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: User not found
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/verify:
+    post:
+      tags:
+        - Authentication
+      summary: Verify session or bearer token
+      description: Validates the authenticity and expiration of a session token.
+      operationId: verifyToken
+      responses:
+        '200':
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Token is valid
+                  token:
+                    type: string
+        '401':
+          description: Token is missing, expired, or invalid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: Invalid or expired token
+
+  /api/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Log out current user
+      description: Clears the active session and expires the authentication cookie.
+      operationId: logoutUser
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Logout successful
+
+  /api/users:
+    get:
+      tags:
+        - Users
+      summary: List all users
+      description: Retrieves an array of all registered users in the database.
+      operationId: getAllUsers
+      responses:
+        '200':
+          description: A list of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '500':
+          description: Error retrieving users from database
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/users/{uid}:
+    get:
+      tags:
+        - Users
+      summary: Get user by numeric UID
+      description: Looks up a specific user account by its integer user ID.
+      operationId: getUserByUid
+      parameters:
+        - name: uid
+          in: path
+          required: true
+          description: The unique integer identifier of the user
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: User found
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: 'Error: User not found'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/users/{id}:
+    get:
+      tags:
+        - Users
+      summary: Get user by username or email
+      description: Looks up a user record matching either the username or email string.
+      operationId: getUserByUsernameOrEmail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Username or email of the user
+          schema:
+            type: string
+            example: alice
+      responses:
+        '200':
+          description: User found
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: 'Error: User not found'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+      description: Session token set as a cookie during login
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token returned in login response payload
+  schemas:
+    User:
+      type: object
+      required:
+        - uid
+        - username
+        - email
+      properties:
+        uid:
+          type: integer
+          example: 1
+          description: Unique user ID
+        username:
+          type: string
+          example: alice
+          description: Unique username
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+          description: User email address
+
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - password
+        - email
+      properties:
+        username:
+          type: string
+          example: alice
+          description: Desired username (must be unique)
+        password:
+          type: string
+          format: password
+          example: securePassword123!
+          description: Account password
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+          description: Valid email address
+        uid:
+          type: integer
+          example: 10
+          description: Optional explicit UID (auto-incremented if omitted)
+
+    LoginRequest:
+      type: object
+      required:
+        - password
+      properties:
+        login:
+          type: string
+          example: alice
+          description: Username or email of the account
+        username:
+          type: string
+          example: alice
+          description: Alternative key for username
+        password:
+          type: string
+          format: password
+          example: securePassword123!
+          description: Account password
+
+    LoginResponse:
+      type: object
+      required:
+        - message
+        - token
+      properties:
+        message:
+          type: string
+          example: Login successful
+        token:
+          type: string
+          example: c4ca4238a0b923820dcc509a6f75849b.1762768000
+          description: Session token formatted as <md5>.<expiration_timestamp>
+
+    ErrorResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: User not found
+
+    OtpSendRequest:
+      type: object
+      required:
+        - identifier
+      properties:
+        identifier:
+          type: string
+          example: alice@vault.io
+          description: Username or email of the account
+
+    OtpSendResponse:
+      type: object
+      required:
+        - message
+        - identifier
+        - email_masked
+        - expires_in
+      properties:
+        message:
+          type: string
+          example: OTP sent to a***e@vault.io
+        identifier:
+          type: string
+          example: alice
+        email_masked:
+          type: string
+          example: a***e@vault.io
+        expires_in:
+          type: integer
+          example: 300
+
+    OtpVerifyRequest:
+      type: object
+      required:
+        - identifier
+        - otp
+      properties:
+        identifier:
+          type: string
+          example: alice@vault.io
+        otp:
+          type: string
+          example: '992578'
+          description: 6-digit OTP received by user
+
+    OtpVerifyResponse:
+      type: object
+      required:
+        - message
+        - token
+        - user
+      properties:
+        message:
+          type: string
+          example: OTP login successful
+        token:
+          type: string
+          example: 5762690cbb0f43632989f63b332a484f.1794294753
+        user:
+          $ref: '#/components/schemas/User'
+
+
