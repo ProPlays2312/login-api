@@ -8,6 +8,7 @@ from email.mime.multipart import MIMEMultipart
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from api.utils import safe_print
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 load_dotenv()
@@ -155,7 +156,7 @@ If you did not request this, please ignore this email.
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
-                print(f"[Resend Success] Sent OTP email to {to_email}")
+                safe_print(f"[Resend Success] Sent OTP email to {to_email}")
                 return True, None
         except urllib.error.HTTPError as e:
             try:
@@ -163,10 +164,10 @@ If you did not request this, please ignore this email.
                 err_msg = err_body.get("message") or str(err_body)
             except Exception:
                 err_msg = str(e)
-            print(f"[Resend Error] {e.code}: {err_msg}")
+            safe_print(f"[Resend Error] {e.code}: {err_msg}")
             return False, f"Resend error: {err_msg}"
         except Exception as e:
-            print(f"[Resend Error] {e}")
+            safe_print(f"[Resend Error] {e}")
             return False, f"Resend dispatch failed: {e}"
 
     # 2. Fallback method: Gmail SMTP
@@ -175,7 +176,7 @@ If you did not request this, please ignore this email.
             f"[Email Warning] Cannot send real email to {to_email}: "
             "RESEND_API_KEY or (SMTP_EMAIL and SMTP_APP_PASSWORD) is not set in .env."
         )
-        print(msg)
+        safe_print(msg)
         return False, "Email credentials not configured in .env (RESEND_API_KEY or SMTP_EMAIL)"
 
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -197,13 +198,13 @@ If you did not request this, please ignore this email.
             server.login(gmail_user, gmail_pass)
             server.send_message(msg)
 
-        print(f"[Gmail Success] Sent OTP email to {to_email}")
+        safe_print(f"[Gmail Success] Sent OTP email to {to_email}")
         return True, None
     except smtplib.SMTPAuthenticationError as e:
         err = f"Gmail Authentication failed. Please verify your App Password: {e}"
-        print(f"[Gmail Error] {err}")
+        safe_print(f"[Gmail Error] {err}")
         return False, err
     except Exception as e:
         err = f"Failed to send email via Gmail SMTP: {e}"
-        print(f"[Gmail Error] {err}")
+        safe_print(f"[Gmail Error] {err}")
         return False, err

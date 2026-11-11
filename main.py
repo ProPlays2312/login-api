@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from opperation import get_users, register, auth_user, create_otp, verify_otp
 from api.token import generate_token, session_token, verify_token
+from api.utils import safe_print
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 load_dotenv()
@@ -321,7 +322,7 @@ if __name__ == "__main__":
     try:
         db_init()
     except Exception as e:
-        print(f"Database init warning: {e}")
+        safe_print(f"Database init warning: {e}")
 
     debug_mode = os.getenv("SERVER_DEBUG", "False").lower() in ("true", "1", "yes")
     host_addr = os.getenv("SERVER_HOST", "0.0.0.0") or "0.0.0.0"

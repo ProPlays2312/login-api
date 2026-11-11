@@ -5,6 +5,7 @@ import psycopg2.extras
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from api.utils import safe_print
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 load_dotenv()
@@ -38,7 +39,7 @@ def get_connection():
         )
         return connection
     except Exception as e:
-        print(f"Error: {e}")
+        safe_print(f"Error: {e}")
         return None
 
 

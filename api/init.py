@@ -1,6 +1,7 @@
 # Description:
 
 from api.db import execute_query
+from api.utils import safe_print
 
 
 def create_tables():
@@ -67,4 +68,4 @@ def db_init():
         else:
             create_tables()
     except Exception as e:
-        print(f"Error initializing DB: {e}")
+        safe_print(f"Error initializing DB: {e}")

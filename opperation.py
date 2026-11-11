@@ -5,7 +5,7 @@ from pathlib import Path
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from api.db import execute_query
-from api.utils import not_null
+from api.utils import not_null, safe_print
 from api.token import generate_token
 from api.mailer import send_otp_email
 
@@ -40,7 +40,7 @@ def auth_user(login, password):
                 }
         return None
     except Exception as e:
-        print(f"Error: {e}")
+        safe_print(f"Error: {e}")
         return None
 
 
@@ -86,7 +86,7 @@ def register(data):
 
         return True
     except Exception as e:
-        print(f"Error: {e}")
+        safe_print(f"Error: {e}")
         return False
 
 
@@ -110,7 +110,7 @@ def get_users(data=None):
             return result
         return None
     except Exception as e:
-        print(f"Error: {e}")
+        safe_print(f"Error: {e}")
         return None
 
 
@@ -143,7 +143,7 @@ def create_otp(identifier, expires_in_seconds=300):
                     "retry_after": 900
                 }, "Rate limit exceeded. Please wait 15 minutes before requesting another OTP."
     except Exception as e:
-        print(f"[OTP Rate Check Notice]: {e}")
+        safe_print(f"[OTP Rate Check Notice]: {e}")
 
     # Cooldown Check: 60-second cooldown between consecutive OTP requests
     try:
@@ -165,7 +165,7 @@ def create_otp(identifier, expires_in_seconds=300):
                             "cooldown_remaining": remaining
                         }, f"Please wait {remaining} seconds before requesting a new OTP."
     except Exception as e:
-        print(f"[OTP Cooldown Check Notice]: {e}")
+        safe_print(f"[OTP Cooldown Check Notice]: {e}")
 
     otp_code = f"{secrets.randbelow(900000) + 100000}"
     expires_at = now + timedelta(seconds=expires_in_seconds)
