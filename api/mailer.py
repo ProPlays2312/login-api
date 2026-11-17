@@ -134,7 +134,41 @@ This code is valid for 5 minutes.
 If you did not request this, please ignore this email.
 """
 
-    # 1. Resend API (used when RESEND_API_KEY is provided and SMTP is not explicitly configured)
+# 1. Gmail SMTP — tried FIRST when credentials are present (can send to ANY recipient)
+    if gmail_user and gmail_pass:
+        safe_print(f"[Gmail SMTP] Attempting to send OTP to {to_email} using SMTP credentials from .env")
+        smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.getenv("SMTP_PORT", "587") or 587)
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"Vault Auth <{gmail_user}>"
+        msg["To"] = to_email
+
+        msg.attach(MIMEText(text_content, "plain"))
+        msg.attach(MIMEText(html_content, "html"))
+
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(gmail_user, gmail_pass)
+                server.send_message(msg)
+
+            safe_print(f"[Gmail SMTP Success] OTP email successfully sent to {to_email}")
+            return True, None
+        except smtplib.SMTPAuthenticationError as e:
+            err = f"Gmail Authentication failed. Check your App Password in .env: {e}"
+            safe_print(f"[Gmail SMTP Error] {err}")
+            return False, err
+        except Exception as e:
+            err = f"Gmail SMTP failed: {e}"
+            safe_print(f"[Gmail SMTP Error] {err}")
+            # Do NOT fall through to Resend – credentials exist but SMTP error occurred
+            return False, err
+
+    # 2. Resend API — fallback when only RESEND_API_KEY is set (free tier: owner email only)
     if resend_api_key and not (gmail_user and gmail_pass):
         resend_from = os.getenv("RESEND_FROM", "Vault Auth <onboarding@resend.dev>")
         payload = {
@@ -170,41 +204,5 @@ If you did not request this, please ignore this email.
             safe_print(f"[Resend Error] {e}")
             return False, f"Resend dispatch failed: {e}"
 
-    # 2. Fallback method: Gmail SMTP
-    if not gmail_user or not gmail_pass:
-        msg = (
-            f"[Email Warning] Cannot send real email to {to_email}: "
-            "RESEND_API_KEY or (SMTP_EMAIL and SMTP_APP_PASSWORD) is not set in .env."
-        )
-        safe_print(msg)
-        return False, "Email credentials not configured in .env (RESEND_API_KEY or SMTP_EMAIL)"
-
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", "587") or 587)
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"Vault Auth <{gmail_user}>"
-    msg["To"] = to_email
-
-    msg.attach(MIMEText(text_content, "plain"))
-    msg.attach(MIMEText(html_content, "html"))
-
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(gmail_user, gmail_pass)
-            server.send_message(msg)
-
-        safe_print(f"[Gmail Success] Sent OTP email to {to_email}")
-        return True, None
-    except smtplib.SMTPAuthenticationError as e:
-        err = f"Gmail Authentication failed. Please verify your App Password: {e}"
-        safe_print(f"[Gmail Error] {err}")
-        return False, err
-    except Exception as e:
-        err = f"Failed to send email via Gmail SMTP: {e}"
-        safe_print(f"[Gmail Error] {err}")
-        return False, err
+    # 3. No credentials configured at all
+    return False, "Email delivery not configured. Add SMTP_EMAIL + SMTP_APP_PASSWORD to .env for full delivery."
