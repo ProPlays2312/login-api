@@ -179,7 +179,7 @@ def create_otp(identifier, expires_in_seconds=300):
     if isinstance(res, str) and res.startswith("Error:"):
         return None, res
 
-    # Send real email via Gmail SMTP
+    # Send real email via Plunk
     email_sent, email_err = send_otp_email(email, otp_code, user.get("username"))
     if not email_sent:
         try:

@@ -177,11 +177,11 @@ def send_otp():
     elif err:
         return jsonify({"message": f"Error: {err}"}), 500
 
-    # If real email dispatch failed (e.g. SMTP credentials missing or bad password)
+    # If real email dispatch failed (e.g. Plunk API error)
     if otp_info.get("email_sent") is False:
         err_detail = otp_info.get("email_err") or "Email could not be delivered"
         return jsonify({
-            "message": f"Email delivery failed: {err_detail}. Please set valid SMTP_EMAIL and SMTP_APP_PASSWORD in .env.",
+            "message": f"Email delivery failed: {err_detail}.",
             "error": err_detail,
             "email_sent": False
         }), 500
