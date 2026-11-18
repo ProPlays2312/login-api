@@ -8,6 +8,24 @@ from dotenv import load_dotenv
 from opperation import get_users, register, auth_user, create_otp, verify_otp
 from api.token import generate_token, session_token, verify_token
 from api.utils import safe_print
+from api.auth_middleware import require_auth
+from api.dashboard import (
+    get_dashboard_overview,
+    get_recent_login_activity,
+    get_active_sessions,
+    revoke_session,
+    revoke_other_sessions,
+    get_connected_applications,
+    disconnect_application,
+    get_security_checklist,
+    calculate_security_score,
+    get_user_profile,
+    update_security_settings,
+    record_login_activity,
+    create_user_session,
+    ensure_default_user_dashboard_data,
+)
+from flask import g
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 load_dotenv()
@@ -104,6 +122,12 @@ def login():
     try:
         result = auth_user(login_identifier, password)
         if not result or (isinstance(result, str) and result.startswith("Error")):
+            try:
+                user_rec = get_users(login_identifier)
+                if user_rec and len(user_rec) > 0:
+                    record_login_activity(user_rec[0]["uid"], request, status="Failed")
+            except Exception:
+                pass
             return jsonify({"message": "User not found"}), 404
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
@@ -125,6 +149,16 @@ def login():
         raw_token = token_res[0] if isinstance(token_res, tuple) else token_res
         s_token = session_token(raw_token)
         session["token"] = s_token
+
+        # Record successful session & activity for dashboard
+        try:
+            if uid:
+                record_login_activity(uid, request, status="Success")
+                create_user_session(uid, s_token, request)
+                ensure_default_user_dashboard_data(uid, {"username": user, "uid": uid})
+        except Exception as e:
+            safe_print(f"Session tracking notice: {e}")
+
         return jsonify({"message": "Login successful", "token": s_token})
     except Exception as e:
         return jsonify({"message": f"Error: {e}"}), 500
@@ -240,6 +274,15 @@ def verify_otp_endpoint():
         s_token = session_token(raw_token)
         session["token"] = s_token
 
+        # Record verified OTP session & activity for dashboard
+        try:
+            if uid:
+                record_login_activity(uid, request, status="Success")
+                create_user_session(uid, s_token, request)
+                ensure_default_user_dashboard_data(uid, user)
+        except Exception as e:
+            safe_print(f"OTP session tracking notice: {e}")
+
         return jsonify({
             "message": "OTP login successful",
             "token": s_token,
@@ -317,10 +360,152 @@ def swagger_ui():
     return html_content, 200, {"Content-Type": "text/html"}
 
 
+# ==============================================================================
+# Dashboard API Endpoints (Protected by @require_auth)
+# ==============================================================================
+
+@app.route("/api/dashboard/overview", methods=["GET"])
+@require_auth
+def dashboard_overview():
+    try:
+        ensure_default_user_dashboard_data(g.user["uid"], g.user)
+        data = get_dashboard_overview(g.user["uid"], g.token)
+        return jsonify(data), 200
+    except Exception as e:
+        safe_print(f"Overview error: {e}")
+        return jsonify({"message": f"Error retrieving overview: {e}"}), 500
+
+
+@app.route("/api/dashboard/login-activity", methods=["GET"])
+@require_auth
+def dashboard_login_activity():
+    try:
+        limit = int(request.args.get("limit", 10))
+        status_filter = request.args.get("status")
+        activities = get_recent_login_activity(g.user["uid"], limit=limit, filter_status=status_filter)
+        return jsonify(activities), 200
+    except Exception as e:
+        safe_print(f"Login activity error: {e}")
+        return jsonify({"message": f"Error retrieving login activity: {e}"}), 500
+
+
+@app.route("/api/sessions", methods=["GET"])
+@require_auth
+def list_sessions():
+    try:
+        sessions = get_active_sessions(g.user["uid"], g.token)
+        return jsonify(sessions), 200
+    except Exception as e:
+        safe_print(f"Sessions error: {e}")
+        return jsonify({"message": f"Error retrieving sessions: {e}"}), 500
+
+
+@app.route("/api/sessions/<string:session_id>", methods=["DELETE"])
+@require_auth
+def delete_session(session_id):
+    try:
+        success, msg = revoke_session(g.user["uid"], session_id)
+        if success:
+            return jsonify({"success": True, "message": msg}), 200
+        return jsonify({"success": False, "message": msg}), 404
+    except Exception as e:
+        safe_print(f"Revoke session error: {e}")
+        return jsonify({"message": f"Error revoking session: {e}"}), 500
+
+
+@app.route("/api/sessions/revoke-others", methods=["POST"])
+@require_auth
+def revoke_others():
+    try:
+        success, msg = revoke_other_sessions(g.user["uid"], g.token)
+        return jsonify({"success": True, "message": msg}), 200
+    except Exception as e:
+        safe_print(f"Revoke others error: {e}")
+        return jsonify({"message": f"Error revoking sessions: {e}"}), 500
+
+
+@app.route("/api/connected-apps", methods=["GET"])
+@require_auth
+def list_connected_apps():
+    try:
+        ensure_default_user_dashboard_data(g.user["uid"], g.user)
+        apps = get_connected_applications(g.user["uid"])
+        return jsonify(apps), 200
+    except Exception as e:
+        safe_print(f"Connected apps error: {e}")
+        return jsonify({"message": f"Error retrieving connected apps: {e}"}), 500
+
+
+@app.route("/api/connected-apps/<int:app_id>", methods=["DELETE"])
+@require_auth
+def delete_connected_app(app_id):
+    try:
+        success, msg = disconnect_application(g.user["uid"], app_id)
+        if success:
+            return jsonify({"success": True, "message": msg}), 200
+        return jsonify({"success": False, "message": msg}), 404
+    except Exception as e:
+        safe_print(f"Disconnect app error: {e}")
+        return jsonify({"message": f"Error disconnecting app: {e}"}), 500
+
+
+@app.route("/api/security/checklist", methods=["GET"])
+@require_auth
+def security_checklist():
+    try:
+        ensure_default_user_dashboard_data(g.user["uid"], g.user)
+        checklist = get_security_checklist(g.user["uid"])
+        return jsonify(checklist), 200
+    except Exception as e:
+        safe_print(f"Security checklist error: {e}")
+        return jsonify({"message": f"Error retrieving security checklist: {e}"}), 500
+
+
+@app.route("/api/security/score", methods=["GET"])
+@require_auth
+def security_score():
+    try:
+        ensure_default_user_dashboard_data(g.user["uid"], g.user)
+        score_data = calculate_security_score(g.user["uid"])
+        return jsonify(score_data), 200
+    except Exception as e:
+        safe_print(f"Security score error: {e}")
+        return jsonify({"message": f"Error calculating security score: {e}"}), 500
+
+
+@app.route("/api/security/settings", methods=["PUT"])
+@require_auth
+def modify_security_settings():
+    try:
+        ensure_default_user_dashboard_data(g.user["uid"], g.user)
+        data = request.get_json() if request.is_json else {}
+        success, msg = update_security_settings(g.user["uid"], data)
+        return jsonify({"success": success, "message": msg}), 200
+    except Exception as e:
+        safe_print(f"Update security error: {e}")
+        return jsonify({"message": f"Error updating security settings: {e}"}), 500
+
+
+@app.route("/api/user/profile", methods=["GET"])
+@require_auth
+def user_profile():
+    try:
+        ensure_default_user_dashboard_data(g.user["uid"], g.user)
+        profile = get_user_profile(g.user["uid"])
+        if profile:
+            return jsonify(profile), 200
+        return jsonify({"message": "Profile not found"}), 404
+    except Exception as e:
+        safe_print(f"User profile error: {e}")
+        return jsonify({"message": f"Error retrieving profile: {e}"}), 500
+
+
 if __name__ == "__main__":
     from api.init import db_init
+    from api.dashboard_db import init_dashboard_db
     try:
         db_init()
+        init_dashboard_db()
     except Exception as e:
         safe_print(f"Database init warning: {e}")
 
