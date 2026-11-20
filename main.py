@@ -9,6 +9,17 @@ from opperation import get_users, register, auth_user, create_otp, verify_otp
 from api.token import generate_token, session_token, verify_token
 from api.utils import safe_print
 from api.auth_middleware import require_auth
+from api.security import (
+    rate_limit,
+    validate_password_strength,
+    validate_email,
+    validate_username,
+    sanitize_string,
+    add_security_headers,
+    log_security_event,
+)
+from api.rbac import require_role, require_admin, get_user_role, is_admin, ROLES, VALID_ROLES
+from api.db import execute_query
 from api.dashboard import (
     get_dashboard_overview,
     get_recent_login_activity,
@@ -32,8 +43,15 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("TOKEN_SECRET", "vault-auth-secret-key-change-in-production")
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # Enforce 1 MB request body limit
 
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+
+@app.after_request
+def apply_security_headers(response):
+    """Enforce defense-in-depth HTTP security headers on all responses."""
+    return add_security_headers(response)
 
 
 @app.route("/", methods=["GET"])
@@ -87,6 +105,7 @@ def username(id):
 
 
 @app.route("/api/register", methods=["POST"])
+@rate_limit(max_requests=10, window_seconds=60, key_prefix="register")
 def create_user():
     data = request.get_json()
     if data is None:
@@ -99,16 +118,41 @@ def create_user():
     if not username or not password or not email:
         return jsonify({"message": "Username, email, and password are required"}), 400
 
+    # Password Policy: Minimum 8 characters, non-empty, reject trivial passwords
+    is_valid, pwd_strength, pwd_errors = validate_password_strength(password)
+    if not is_valid:
+        log_security_event("REGISTRATION_REJECTED", details=f"reason=weak_password username={username}")
+        return jsonify({
+            "message": "Password does not meet security requirements.",
+            "errors": pwd_errors
+        }), 400
+
+    # Validate email
+    try:
+        data["email"] = validate_email(email)
+    except ValueError as ve:
+        return jsonify({"message": f"Invalid email: {ve}"}), 400
+
+    # Validate username
+    try:
+        data["username"] = validate_username(username)
+    except ValueError as ve:
+        return jsonify({"message": f"Invalid username: {ve}"}), 400
+
     try:
         result = register(data)
         if result is False:
+            log_security_event("REGISTRATION_FAILED", details=f"username={username}")
             return jsonify({"message": "Registration failed. Username or email may already be taken."}), 400
+        log_security_event("REGISTRATION_SUCCESS", details=f"username={username}")
         return jsonify(result), 200
     except Exception as e:
+        safe_print(f"Registration error: {e}")
         return jsonify({"message": f"Error: {e}"}), 500
 
 
 @app.route("/api/login", methods=["POST"])
+@rate_limit(max_requests=15, window_seconds=60, key_prefix="login")
 def login():
     data = request.get_json()
     if data is None:
@@ -128,8 +172,10 @@ def login():
                     record_login_activity(user_rec[0]["uid"], request, status="Failed")
             except Exception:
                 pass
+            log_security_event("LOGIN_FAILED", details=f"identifier={login_identifier}")
             return jsonify({"message": "User not found"}), 404
     except Exception as e:
+        safe_print(f"Login error: {e}")
         return jsonify({"message": f"Error: {e}"}), 500
 
     try:
@@ -159,8 +205,10 @@ def login():
         except Exception as e:
             safe_print(f"Session tracking notice: {e}")
 
+        log_security_event("LOGIN_SUCCESS", uid=uid, details=f"username={user}")
         return jsonify({"message": "Login successful", "token": s_token})
     except Exception as e:
+        safe_print(f"Login token error: {e}")
         return jsonify({"message": f"Error: {e}"}), 500
 
 
@@ -177,6 +225,7 @@ def mask_email(email):
 
 @app.route("/api/otp/send", methods=["POST"])
 @app.route("/api/login/otp/send", methods=["POST"])
+@rate_limit(max_requests=10, window_seconds=60, key_prefix="otp_send")
 def send_otp():
     data = request.get_json() if request.is_json else {}
     if not data:
@@ -194,8 +243,10 @@ def send_otp():
 
     otp_info, err = create_otp(identifier)
     if err == "User not found":
+        log_security_event("OTP_SEND_FAILED", details=f"identifier={identifier} reason=not_found")
         return jsonify({"message": "User not found"}), 404
     elif err == "Account is deactivated":
+        log_security_event("OTP_SEND_BLOCKED", details=f"identifier={identifier} reason=deactivated")
         return jsonify({"message": "Account is deactivated. Please contact your administrator."}), 403
     elif isinstance(otp_info, dict) and otp_info.get("rate_limited"):
         return jsonify({
@@ -214,6 +265,7 @@ def send_otp():
     # If real email dispatch failed (e.g. Plunk API error)
     if otp_info.get("email_sent") is False:
         err_detail = otp_info.get("email_err") or "Email could not be delivered"
+        log_security_event("OTP_DELIVERY_FAILED", details=f"identifier={identifier} err={err_detail}")
         return jsonify({
             "message": f"Email delivery failed: {err_detail}.",
             "error": err_detail,
@@ -232,12 +284,14 @@ def send_otp():
         "email_sent": otp_info.get("email_sent", False)
     }
 
+    log_security_event("OTP_SENT_SUCCESS", details=f"identifier={identifier} email={masked}")
     return jsonify(response_data), 200
 
 
 @app.route("/api/otp/verify", methods=["POST"])
 @app.route("/api/login/otp/verify", methods=["POST"])
 @app.route("/api/login/otp", methods=["POST"])
+@rate_limit(max_requests=15, window_seconds=60, key_prefix="otp_verify")
 def verify_otp_endpoint():
     data = request.get_json() if request.is_json else {}
     if not data:
@@ -260,11 +314,15 @@ def verify_otp_endpoint():
 
     user, err = verify_otp(identifier, otp_code)
     if err == "User not found":
+        log_security_event("OTP_VERIFY_FAILED", details=f"identifier={identifier} reason=not_found")
         return jsonify({"message": "User not found"}), 404
     elif err == "Account is deactivated":
+        log_security_event("OTP_VERIFY_BLOCKED", details=f"identifier={identifier} reason=deactivated")
         return jsonify({"message": "Account is deactivated"}), 403
     elif err or not user:
-        return jsonify({"message": "Invalid or expired OTP"}), 401
+        err_msg = err if (isinstance(err, str) and err) else "Invalid or expired OTP"
+        log_security_event("OTP_VERIFY_FAILED", details=f"identifier={identifier} reason={err_msg}")
+        return jsonify({"message": err_msg}), 401
 
     try:
         uid = user.get("uid") or 0
@@ -283,6 +341,7 @@ def verify_otp_endpoint():
         except Exception as e:
             safe_print(f"OTP session tracking notice: {e}")
 
+        log_security_event("OTP_VERIFY_SUCCESS", uid=uid, details=f"username={username}")
         return jsonify({
             "message": "OTP login successful",
             "token": s_token,
@@ -293,6 +352,7 @@ def verify_otp_endpoint():
             }
         }), 200
     except Exception as e:
+        safe_print(f"OTP token generation error: {e}")
         return jsonify({"message": f"Error: {e}"}), 500
 
 
@@ -317,10 +377,117 @@ def verify():
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    elif request.is_json and request.get_json():
+        token = request.get_json().get("token")
+    elif request.args.get("token"):
+        token = request.args.get("token")
+    else:
+        token = session.get("token") or request.cookies.get("token")
+
+    if token:
+        try:
+            execute_query(
+                "UPDATE active_sessions SET is_active = FALSE WHERE session_token = %s",
+                (token,)
+            )
+            log_security_event("LOGOUT_SESSION_INVALIDATED", details="Session explicitly deactivated in DB")
+        except Exception as e:
+            safe_print(f"[Logout Session Invalidation]: {e}")
+
     session.pop("token", None)
     response = jsonify({"message": "Logout successful"})
     response.set_cookie("token", "", expires=0)
     return response, 200
+
+
+# ==============================================================================
+# Role-Based Access Control (RBAC) & Enterprise Admin Endpoints
+# ==============================================================================
+
+@app.route("/api/user/role", methods=["GET"])
+@require_auth
+def get_current_user_role():
+    """Retrieve the authenticated user's assigned role."""
+    try:
+        role = get_user_role(g.user["uid"])
+        return jsonify({
+            "uid": g.user["uid"],
+            "username": g.user.get("username"),
+            "role": role,
+            "role_title": ROLES.get(role, "End User")
+        }), 200
+    except Exception as e:
+        safe_print(f"[RBAC] get role error: {e}")
+        return jsonify({"message": "Error retrieving role"}), 500
+
+
+@app.route("/api/admin/users", methods=["GET"])
+@require_auth
+@require_admin
+def admin_list_users():
+    """Enterprise Admin: retrieve employee user directory with roles."""
+    try:
+        user_list = get_users(None)
+        if user_list is None:
+            return jsonify({"message": "Error getting users"}), 500
+
+        sanitized_users = []
+        for u in user_list:
+            uid = u.get("uid")
+            role = get_user_role(uid)
+            sanitized_users.append({
+                "uid": uid,
+                "username": u.get("username"),
+                "email": u.get("email"),
+                "full_name": u.get("full_name"),
+                "is_active": u.get("is_active", True),
+                "role": role,
+                "role_title": ROLES.get(role, "End User")
+            })
+        log_security_event("ADMIN_DIRECTORY_ACCESSED", uid=g.user["uid"])
+        return jsonify(sanitized_users), 200
+    except Exception as e:
+        safe_print(f"[Admin List Users]: {e}")
+        return jsonify({"message": "Error retrieving users"}), 500
+
+
+@app.route("/api/admin/users/<int:target_uid>/role", methods=["PUT"])
+@require_auth
+@require_admin
+def admin_update_user_role(target_uid):
+    """Enterprise Admin: update a target employee's role."""
+    try:
+        data = request.get_json() or {}
+        new_role = str(data.get("role", "")).lower().strip()
+        if new_role not in VALID_ROLES:
+            return jsonify({
+                "success": False,
+                "message": f"Invalid role. Allowed roles are: {list(VALID_ROLES)}"
+            }), 400
+
+        target_user = get_users(target_uid)
+        if not target_user:
+            return jsonify({"success": False, "message": "Target user not found"}), 404
+
+        execute_query("UPDATE users SET role = %s WHERE uid = %s", (new_role, target_uid))
+        log_security_event(
+            "ADMIN_ROLE_CHANGE",
+            uid=g.user["uid"],
+            details=f"target_uid={target_uid} new_role={new_role}"
+        )
+        return jsonify({
+            "success": True,
+            "message": f"User role successfully updated to '{new_role}'",
+            "uid": target_uid,
+            "role": new_role
+        }), 200
+    except Exception as e:
+        safe_print(f"[Admin Set Role]: {e}")
+        return jsonify({"message": "Error updating user role"}), 500
 
 
 @app.route("/openapi.json", methods=["GET"])

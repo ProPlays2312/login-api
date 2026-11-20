@@ -47,6 +47,11 @@ def create_tables():
         execute_query("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email);")
         execute_query("UPDATE users SET is_active = TRUE WHERE is_active IS NULL;")
         execute_query("ALTER TABLE otps ADD COLUMN IF NOT EXISTS phone VARCHAR(20);")
+        execute_query("ALTER TABLE otps ADD COLUMN IF NOT EXISTS otp_hash VARCHAR(64);")
+        execute_query("ALTER TABLE otps ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0;")
+        execute_query("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user';")
+        execute_query("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);")
+        execute_query("UPDATE users SET role = 'user' WHERE role IS NULL;")
         return True
     except Exception as e:
         return f"Error: {e}"
@@ -54,18 +59,6 @@ def create_tables():
 
 def db_init():
     try:
-        query = "SELECT table_name FROM information_schema.tables WHERE table_schema='public';"
-        result = execute_query(query)
-        if isinstance(result, list):
-            existing_tables = set()
-            for row in result:
-                if isinstance(row, dict):
-                    existing_tables.update(row.values())
-                elif isinstance(row, (tuple, list)):
-                    existing_tables.update(row)
-            if "users" not in existing_tables or "tokens" not in existing_tables or "otps" not in existing_tables:
-                create_tables()
-        else:
-            create_tables()
+        create_tables()
     except Exception as e:
         safe_print(f"Error initializing DB: {e}")

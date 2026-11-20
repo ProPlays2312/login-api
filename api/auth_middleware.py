@@ -120,20 +120,24 @@ def resolve_user_from_token(token):
 
     token_md5 = token.split(".")[0] if "." in token else token
 
-    # Check active_sessions first
+    # Check active_sessions first (authoritative for session status and revocation)
     try:
         session_query = """
-        SELECT s.id as session_id, s.uid, u.username, u.email, u.full_name, u.is_active
+        SELECT s.id as session_id, s.uid, s.is_active as session_active, u.username, u.email, u.full_name, u.is_active
         FROM active_sessions s
         JOIN users u ON s.uid = u.uid
-        WHERE s.session_token = %s AND s.is_active = TRUE
+        WHERE s.session_token = %s
+        ORDER BY s.id DESC
         LIMIT 1
         """
         rows = execute_query(session_query, (token,))
         if isinstance(rows, list) and len(rows) > 0:
-            user = rows[0]
-            if user.get("is_active") is not False:
-                return user
+            sess = rows[0]
+            # If session is explicitly marked inactive/revoked, reject immediately
+            if sess.get("session_active") is False:
+                return None
+            if sess.get("is_active") is not False:
+                return sess
     except Exception as e:
         safe_print(f"Session lookup note: {e}")
 
