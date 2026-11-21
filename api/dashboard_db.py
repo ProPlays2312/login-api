@@ -23,6 +23,8 @@ def create_dashboard_tables():
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         last_activity TIMESTAMP NOT NULL DEFAULT NOW(),
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        expires_at TIMESTAMP,
+        revoked_at TIMESTAMP,
         CONSTRAINT fk_session_user FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE
     );
     """
@@ -84,8 +86,13 @@ def create_dashboard_tables():
         execute_query(connected_apps_table)
         execute_query(user_security_settings_table)
         
+        # Ensure new session columns exist for backward compatibility
+        execute_query("ALTER TABLE active_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;")
+        execute_query("ALTER TABLE active_sessions ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;")
+
         # Create indexes for fast user lookup
         execute_query("CREATE INDEX IF NOT EXISTS idx_sessions_uid ON active_sessions(uid);")
+        execute_query("CREATE INDEX IF NOT EXISTS idx_sessions_active ON active_sessions(uid, is_active);")
         execute_query("CREATE INDEX IF NOT EXISTS idx_activity_uid ON login_activity(uid);")
         execute_query("CREATE INDEX IF NOT EXISTS idx_apps_uid ON connected_apps(uid);")
         return True
