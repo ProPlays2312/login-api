@@ -2,6 +2,8 @@
 
 import json
 import uuid
+import os
+import time
 from datetime import datetime, timedelta
 from api.db import execute_query
 from api.utils import safe_print
@@ -141,13 +143,26 @@ def create_user_session(uid, token, req):
     """Create or refresh an active device session."""
     device = parse_client_device(req)
     session_id = f"sess_{uuid.uuid4().hex[:16]}"
+
+    # Extract or compute expiration
+    expires_at = None
+    if token and "." in str(token):
+        try:
+            exp_ts = int(str(token).split(".")[1])
+            expires_at = datetime.fromtimestamp(exp_ts)
+        except Exception:
+            pass
+    if not expires_at:
+        exp_sec = int(os.getenv("TOKEN_EXPIRATION", "3600") or 3600)
+        expires_at = datetime.now() + timedelta(seconds=exp_sec)
+
     query = """
     INSERT INTO active_sessions (
         uid, session_id, session_token, device_name, device_type,
-        browser, os, ip_address, location, created_at, last_activity, is_active
-    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), TRUE)
+        browser, os, ip_address, location, created_at, last_activity, expires_at, is_active, revoked_at
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, TRUE, NULL)
     """
-    execute_query(query, (
+    res = execute_query(query, (
         uid,
         session_id,
         token,
@@ -156,8 +171,28 @@ def create_user_session(uid, token, req):
         device["browser"],
         device["os"],
         device["ip_address"],
-        device["location"]
+        device["location"],
+        expires_at
     ))
+    if isinstance(res, str) and res.startswith("Error:"):
+        # Fallback for schema without expires_at/revoked_at columns
+        fallback_query = """
+        INSERT INTO active_sessions (
+            uid, session_id, session_token, device_name, device_type,
+            browser, os, ip_address, location, created_at, last_activity, is_active
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), TRUE)
+        """
+        execute_query(fallback_query, (
+            uid,
+            session_id,
+            token,
+            device["device_name"],
+            device["device_type"],
+            device["browser"],
+            device["os"],
+            device["ip_address"],
+            device["location"]
+        ))
     return session_id
 
 
@@ -253,16 +288,145 @@ def calculate_security_score(uid):
     }
 
 
+def cleanup_expired_sessions(uid=None):
+    """Mark expired sessions as inactive."""
+    now = datetime.now()
+    try:
+        if uid is not None:
+            execute_query(
+                "UPDATE active_sessions SET is_active = FALSE WHERE uid = %s AND is_active = TRUE AND expires_at IS NOT NULL AND expires_at <= %s",
+                (uid, now)
+            )
+        else:
+            execute_query(
+                "UPDATE active_sessions SET is_active = FALSE WHERE is_active = TRUE AND expires_at IS NOT NULL AND expires_at <= %s",
+                (now,)
+            )
+    except Exception as e:
+        safe_print(f"Cleanup expired sessions notice: {e}")
+
+
+def get_valid_active_sessions(uid, current_token=None):
+    """
+    Retrieve only genuinely valid, active, non-expired, and non-revoked sessions for the user.
+    Rules:
+    - User has authenticated
+    - is_active is TRUE
+    - revoked_at IS NULL
+    - expires_at IS NULL or expires_at > NOW()
+    - Does NOT count failed, blocked, expired, revoked, or logged-out records.
+    """
+    cleanup_expired_sessions(uid)
+    now = datetime.now()
+
+    query = """
+    SELECT id, session_id, session_token, device_name, device_type,
+           browser, os, ip_address, location, created_at, last_activity, expires_at, is_active
+    FROM active_sessions
+    WHERE uid = %s AND is_active = TRUE AND (revoked_at IS NULL) AND (expires_at IS NULL OR expires_at > %s)
+    ORDER BY last_activity DESC
+    """
+    rows = execute_query(query, (uid, now))
+    if isinstance(rows, str) and rows.startswith("Error:"):
+        # Fallback if revoked_at or expires_at columns not yet present in schema
+        fallback_query = """
+        SELECT id, session_id, session_token, device_name, device_type,
+               browser, os, ip_address, location, created_at, last_activity, is_active
+        FROM active_sessions
+        WHERE uid = %s AND is_active = TRUE
+        ORDER BY last_activity DESC
+        """
+        rows = execute_query(fallback_query, (uid,))
+
+    results = []
+    has_current = False
+    if isinstance(rows, list):
+        for r in rows:
+            tok = r.get("session_token") or ""
+            # Check embedded expiration in session token (e.g. md5.expiration_timestamp)
+            if "." in str(tok):
+                try:
+                    exp_ts = int(str(tok).split(".")[1])
+                    if exp_ts < int(time.time()):
+                        # Token has expired; deactivate in DB
+                        try:
+                            execute_query("UPDATE active_sessions SET is_active = FALSE WHERE id = %s", (r["id"],))
+                        except Exception:
+                            pass
+                        continue
+                except Exception:
+                    pass
+
+            is_cur = bool(current_token and tok == current_token)
+            if is_cur:
+                has_current = True
+            results.append({
+                "id": r.get("id"),
+                "session_id": r.get("session_id"),
+                "device_name": r.get("device_name", "Active Device"),
+                "device_type": r.get("device_type", "desktop"),
+                "browser": r.get("browser", "Chrome"),
+                "os": r.get("os", "Unknown"),
+                "location": r.get("location", "Bengaluru, India"),
+                "ip_address": mask_ip_address(r.get("ip_address")),
+                "created_at": format_relative_timestamp(r.get("created_at")),
+                "last_active": format_relative_timestamp(r.get("last_activity")),
+                "is_current": is_cur,
+                "is_active": True
+            })
+
+    if results and not has_current and current_token:
+        results[0]["is_current"] = True
+
+    return results
+
+
+def get_active_sessions(uid, current_token=None):
+    """Retrieve active devices/sessions for the user."""
+    return get_valid_active_sessions(uid, current_token)
+
+
+def get_active_sessions_endpoint_data(uid, current_token=None):
+    """
+    Format payload for GET /api/sessions/active endpoint:
+    {
+      "success": true,
+      "active_sessions": 2,
+      "devices": [
+        {
+          "device_name": "MacBook Pro 16",
+          "browser": "Chrome 131",
+          "is_active": true
+        }
+      ]
+    }
+    """
+    sessions = get_valid_active_sessions(uid, current_token)
+    devices = [
+        {
+            "session_id": s["session_id"],
+            "device_name": s["device_name"],
+            "browser": s["browser"],
+            "os": s.get("os", "Unknown"),
+            "location": s.get("location", "Bengaluru, India"),
+            "last_active": s["last_active"],
+            "is_current": s.get("is_current", False),
+            "is_active": True
+        }
+        for s in sessions
+    ]
+    return {
+        "success": True,
+        "active_sessions": len(devices),
+        "devices": devices
+    }
+
+
 def get_dashboard_overview(uid, current_token=None):
     """Aggregate statistics for Account Overview cards."""
-    # Active sessions count
-    sess_rows = execute_query(
-        "SELECT COUNT(*) as cnt FROM active_sessions WHERE uid = %s AND is_active = TRUE",
-        (uid,)
-    )
-    active_sessions_count = sess_rows[0].get("cnt", 1) if sess_rows else 1
-    # Ensure at least 1 session is reported (the current device)
-    active_sessions_count = max(1, active_sessions_count)
+    # Active sessions count calculated strictly from valid active sessions
+    valid_sessions = get_valid_active_sessions(uid, current_token)
+    active_sessions_count = len(valid_sessions)
 
     # Connected apps count
     apps_rows = execute_query(
@@ -353,63 +517,24 @@ def get_recent_login_activity(uid, limit=10, filter_status=None):
     return results
 
 
-def get_active_sessions(uid, current_token=None):
-    """Retrieve active devices/sessions with current session highlighted."""
-    query = """
-    SELECT id, session_id, session_token, device_name, device_type,
-           browser, os, ip_address, location, created_at, last_activity, is_active
-    FROM active_sessions
-    WHERE uid = %s AND is_active = TRUE
-    ORDER BY last_activity DESC
-    """
-    rows = execute_query(query, (uid,))
-    results = []
-
-    has_current = False
-    if isinstance(rows, list):
-        for r in rows:
-            is_cur = bool(current_token and r["session_token"] == current_token)
-            if is_cur:
-                has_current = True
-            results.append({
-                "id": r["id"],
-                "session_id": r["session_id"],
-                "device_name": r["device_name"],
-                "device_type": r.get("device_type", "desktop"),
-                "browser": r["browser"],
-                "os": r["os"],
-                "location": r.get("location", "Bengaluru, India"),
-                "ip_address": mask_ip_address(r.get("ip_address")),
-                "created_at": format_relative_timestamp(r["created_at"]),
-                "last_active": format_relative_timestamp(r["last_activity"]),
-                "is_current": is_cur
-            })
-
-    # If list is empty and current token provided, automatically register this active device session
-    if not results and current_token:
-        try:
-            from flask import request
-            create_user_session(uid, current_token, request)
-            return get_active_sessions(uid, current_token)
-        except Exception:
-            pass
-
-    # If list has results but current session wasn't matched, mark first as current
-    if results and not has_current:
-        results[0]["is_current"] = True
-
-    return results
-
-
 def revoke_session(uid, session_id):
     """Revoke a specific active session for the authenticated user."""
     query = """
     UPDATE active_sessions
-    SET is_active = FALSE
-    WHERE uid = %s AND session_id = %s
+    SET is_active = FALSE, revoked_at = NOW()
+    WHERE uid = %s AND session_id = %s AND is_active = TRUE
     RETURNING id
     """
     res = execute_query(query, (uid, session_id))
+    if isinstance(res, str) and res.startswith("Error:"):
+        # Fallback if revoked_at column not present
+        fallback_query = """
+        UPDATE active_sessions
+        SET is_active = FALSE
+        WHERE uid = %s AND session_id = %s AND is_active = TRUE
+        RETURNING id
+        """
+        res = execute_query(fallback_query, (uid, session_id))
     if isinstance(res, list) and len(res) > 0:
         return True, "Session revoked successfully"
     return False, "Session not found or already inactive"
@@ -419,11 +544,19 @@ def revoke_other_sessions(uid, current_token):
     """Revoke all active sessions except the current active session."""
     query = """
     UPDATE active_sessions
-    SET is_active = FALSE
+    SET is_active = FALSE, revoked_at = NOW()
     WHERE uid = %s AND session_token != %s AND is_active = TRUE
     RETURNING id
     """
     res = execute_query(query, (uid, current_token))
+    if isinstance(res, str) and res.startswith("Error:"):
+        fallback_query = """
+        UPDATE active_sessions
+        SET is_active = FALSE
+        WHERE uid = %s AND session_token != %s AND is_active = TRUE
+        RETURNING id
+        """
+        res = execute_query(fallback_query, (uid, current_token))
     count = len(res) if isinstance(res, list) else 0
     return True, f"Revoked {count} other session(s)"
 

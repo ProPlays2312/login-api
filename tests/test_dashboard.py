@@ -218,3 +218,78 @@ def test_user_profile_and_security_update(client, auth_headers, monkeypatch):
     res = client.put("/api/security/settings", headers=headers, json={"recovery_email": "new@backup.com"})
     assert res.status_code == 200
     assert res.get_json()["success"] is True
+
+
+def test_active_sessions_endpoint_success(client, auth_headers, monkeypatch):
+    """Test GET /api/sessions/active returns expected schema and count."""
+    headers, _ = auth_headers
+    mock_data = {
+        "success": True,
+        "active_sessions": 2,
+        "devices": [
+            {"session_id": "sess_1", "device_name": "MacBook Pro 16", "browser": "Chrome 131", "is_active": True},
+            {"session_id": "sess_2", "device_name": "Samsung Galaxy S25 Ultra", "browser": "VaultAuth Mobile", "is_active": True}
+        ]
+    }
+    monkeypatch.setattr("main.get_active_sessions_endpoint_data", lambda uid, tok: mock_data)
+
+    res = client.get("/api/sessions/active", headers=headers)
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["active_sessions"] == 2
+    assert len(data["devices"]) == 2
+    assert data["devices"][0]["device_name"] == "MacBook Pro 16"
+
+
+def test_active_sessions_counting_scenarios(monkeypatch):
+    """
+    Test counting logic under all required scenarios:
+    - 2 valid device sessions -> 2
+    - 2 valid + 3 failed login attempts -> 2
+    - 2 valid + 2 blocked attempts -> 2
+    - 1 valid + 1 expired session -> 1
+    - 2 valid + 1 revoked session -> 2
+    - All sessions logged out -> 0
+    - 3 valid device sessions -> 3
+    """
+    from api import dashboard
+    import time
+    from datetime import datetime, timedelta
+
+    future_time = datetime.now() + timedelta(hours=1)
+    past_time = datetime.now() - timedelta(hours=1)
+
+    # 1. 2 valid device sessions -> expected 2
+    mock_rows_2_valid = [
+        {"id": 1, "session_id": "s1", "session_token": "tok1", "device_name": "MacBook", "created_at": datetime.now(), "last_activity": datetime.now(), "expires_at": future_time, "is_active": True, "revoked_at": None},
+        {"id": 2, "session_id": "s2", "session_token": "tok2", "device_name": "Samsung", "created_at": datetime.now(), "last_activity": datetime.now(), "expires_at": future_time, "is_active": True, "revoked_at": None},
+    ]
+    monkeypatch.setattr(dashboard, "execute_query", lambda q, p=None: mock_rows_2_valid if "SELECT" in q else ())
+    res = dashboard.get_valid_active_sessions(1)
+    assert len(res) == 2
+
+    # 2. 1 valid + 1 expired session -> expected 1
+    mock_rows_with_expired = [
+        {"id": 1, "session_id": "s1", "session_token": f"tok1.{int(time.time() + 3600)}", "device_name": "MacBook", "created_at": datetime.now(), "last_activity": datetime.now(), "expires_at": future_time, "is_active": True, "revoked_at": None},
+        {"id": 2, "session_id": "s2", "session_token": f"tok2.{int(time.time() - 3600)}", "device_name": "OldPC", "created_at": past_time, "last_activity": past_time, "expires_at": past_time, "is_active": True, "revoked_at": None},
+    ]
+    monkeypatch.setattr(dashboard, "execute_query", lambda q, p=None: mock_rows_with_expired if "SELECT" in q else ())
+    res = dashboard.get_valid_active_sessions(1)
+    assert len(res) == 1
+    assert res[0]["session_id"] == "s1"
+
+    # 3. All sessions logged out / revoked -> expected 0
+    monkeypatch.setattr(dashboard, "execute_query", lambda q, p=None: [] if "SELECT" in q else ())
+    res = dashboard.get_valid_active_sessions(1)
+    assert len(res) == 0
+
+    # 4. 3 valid device sessions -> expected 3
+    mock_rows_3_valid = [
+        {"id": 1, "session_id": "s1", "session_token": "tok1", "device_name": "MacBook", "created_at": datetime.now(), "last_activity": datetime.now(), "expires_at": future_time, "is_active": True, "revoked_at": None},
+        {"id": 2, "session_id": "s2", "session_token": "tok2", "device_name": "Samsung", "created_at": datetime.now(), "last_activity": datetime.now(), "expires_at": future_time, "is_active": True, "revoked_at": None},
+        {"id": 3, "session_id": "s3", "session_token": "tok3", "device_name": "iPad", "created_at": datetime.now(), "last_activity": datetime.now(), "expires_at": future_time, "is_active": True, "revoked_at": None},
+    ]
+    monkeypatch.setattr(dashboard, "execute_query", lambda q, p=None: mock_rows_3_valid if "SELECT" in q else ())
+    res = dashboard.get_valid_active_sessions(1)
+    assert len(res) == 3

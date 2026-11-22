@@ -24,6 +24,7 @@ from api.dashboard import (
     get_dashboard_overview,
     get_recent_login_activity,
     get_active_sessions,
+    get_active_sessions_endpoint_data,
     revoke_session,
     revoke_other_sessions,
     get_connected_applications,
@@ -391,11 +392,18 @@ def logout():
     if token:
         try:
             execute_query(
-                "UPDATE active_sessions SET is_active = FALSE WHERE session_token = %s",
+                "UPDATE active_sessions SET is_active = FALSE, revoked_at = NOW() WHERE session_token = %s",
                 (token,)
             )
             log_security_event("LOGOUT_SESSION_INVALIDATED", details="Session explicitly deactivated in DB")
         except Exception as e:
+            try:
+                execute_query(
+                    "UPDATE active_sessions SET is_active = FALSE WHERE session_token = %s",
+                    (token,)
+                )
+            except Exception:
+                pass
             safe_print(f"[Logout Session Invalidation]: {e}")
 
     session.pop("token", None)
@@ -565,6 +573,18 @@ def list_sessions():
     except Exception as e:
         safe_print(f"Sessions error: {e}")
         return jsonify({"message": f"Error retrieving sessions: {e}"}), 500
+
+
+@app.route("/api/sessions/active", methods=["GET"])
+@require_auth
+def active_sessions_summary():
+    """Return strictly verified active and valid device sessions for the authenticated user."""
+    try:
+        data = get_active_sessions_endpoint_data(g.user["uid"], g.token)
+        return jsonify(data), 200
+    except Exception as e:
+        safe_print(f"Active sessions error: {e}")
+        return jsonify({"success": False, "message": f"Error retrieving active sessions: {e}"}), 500
 
 
 @app.route("/api/sessions/<string:session_id>", methods=["DELETE"])
