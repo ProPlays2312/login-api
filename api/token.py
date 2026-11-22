@@ -37,13 +37,20 @@ def session_token(md5sum):
 
 def verify_token(token):
     try:
-        parts = token.split(".")
+        if not token or not isinstance(token, str):
+            return False
+        parts = token.strip().split(".")
         if len(parts) != 2:
             return False
-        md5sum, expiration = parts
+        md5sum, expiration = parts[0].strip(), parts[1].strip()
+        if not md5sum or not expiration:
+            return False
+        if not md5sum.isalnum():
+            return False
+        if not expiration.isdigit():
+            return False
         if int(expiration) < int(time.time()):
             return False
-        else:
-            return True
+        return True
     except (ValueError, TypeError, AttributeError):
         return False
