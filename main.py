@@ -43,7 +43,7 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("TOKEN_SECRET", "vault-auth-secret-key-change-in-production")
+app.secret_key = os.getenv("SECRET_KEY") or os.getenv("TOKEN_SECRET", "vault-auth-secret-key-change-in-production")
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # Enforce 1 MB request body limit
 
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
