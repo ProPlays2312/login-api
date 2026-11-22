@@ -30,6 +30,6 @@ config = {
     "SESSION_EXPIRES": int(os.environ.get('SESSION_Expires', '3600') or 3600),
     "SESSION_KEY_PREFIX": "session",
     "SESSION_COOKIE_NAME": "token",
-    "SESSION_COOKIE_DOMAIN": "*",
+    "SESSION_COOKIE_DOMAIN": None,
     "SESSION_COOKIE_SAMESITE": "Lax",
 }
