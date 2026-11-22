@@ -1,8 +1,16 @@
+def test_get_users_unauthenticated(client):
+    response = client.get("/api/users")
+    assert response.status_code == 401
+
+
 def test_get_users_success(client, monkeypatch):
     mock_users = [{"uid": 1, "username": "alice", "email": "alice@example.com"}]
     monkeypatch.setattr("main.get_users", lambda uid: mock_users)
+    from api.token import session_token
+    token = session_token("testhash")
+    monkeypatch.setattr("api.auth_middleware.resolve_user_from_token", lambda tok: {"uid": 1, "username": "alice"})
 
-    response = client.get("/api/users")
+    response = client.get("/api/users", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.get_json() == mock_users
 
@@ -10,16 +18,22 @@ def test_get_users_success(client, monkeypatch):
 def test_get_user_by_id_found(client, monkeypatch):
     mock_user = [{"uid": 1, "username": "alice", "email": "alice@example.com"}]
     monkeypatch.setattr("main.get_users", lambda uid: mock_user)
+    from api.token import session_token
+    token = session_token("testhash")
+    monkeypatch.setattr("api.auth_middleware.resolve_user_from_token", lambda tok: {"uid": 1, "username": "alice"})
 
-    response = client.get("/api/users/1")
+    response = client.get("/api/users/1", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.get_json() == mock_user
 
 
 def test_get_user_by_id_not_found(client, monkeypatch):
     monkeypatch.setattr("main.get_users", lambda uid: None)
+    from api.token import session_token
+    token = session_token("testhash")
+    monkeypatch.setattr("api.auth_middleware.resolve_user_from_token", lambda tok: {"uid": 1, "username": "alice"})
 
-    response = client.get("/api/users/999")
+    response = client.get("/api/users/999", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 404
     assert response.get_json()["message"] == "Error: User not found"
 

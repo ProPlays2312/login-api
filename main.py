@@ -70,6 +70,7 @@ def health_check():
 
 
 @app.route("/api/users", methods=["GET"])
+@require_auth
 def users():
     try:
         user_list = get_users(None)
@@ -82,6 +83,7 @@ def users():
 
 
 @app.route("/api/users/<int:uid>", methods=["GET"])
+@require_auth
 def users_id(uid):
     try:
         user = get_users(uid)
@@ -94,6 +96,7 @@ def users_id(uid):
 
 
 @app.route("/api/users/<string:id>", methods=["GET"])
+@require_auth
 def username(id):
     try:
         user = get_users(id)
