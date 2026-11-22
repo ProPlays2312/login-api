@@ -183,11 +183,13 @@ def create_otp(identifier, expires_in_seconds=300):
     except Exception as e:
         safe_print(f"[OTP Invalidate Previous Notice]: {e}")
 
+    # Store masked placeholder in legacy otp_code column to prevent plaintext storage in DB
+    masked_otp = "******"
     query = """
     INSERT INTO otps (uid, email, otp_code, otp_hash, created_at, expires_at, used, attempts)
     VALUES (%s, %s, %s, %s, %s, %s, FALSE, 0)
     """
-    params = (uid, email, otp_code, otp_hash, now, expires_at)
+    params = (uid, email, masked_otp, otp_hash, now, expires_at)
     res = execute_query(query, params)
     if isinstance(res, str) and res.startswith("Error:"):
         # Graceful fallback if database schema is missing otp_hash or attempts columns
@@ -203,7 +205,7 @@ def create_otp(identifier, expires_in_seconds=300):
     email_sent, email_err = send_otp_email(email, otp_code, user.get("username"))
     if not email_sent:
         try:
-            execute_query("DELETE FROM otps WHERE uid = %s AND otp_code = %s", (uid, otp_code))
+            execute_query("DELETE FROM otps WHERE uid = %s AND (otp_hash = %s OR otp_code = %s)", (uid, otp_hash, otp_code))
         except Exception:
             pass
 
