@@ -67,18 +67,20 @@ def format_relative_timestamp(dt):
     now = datetime.now()
     today = now.date()
     yesterday = today - timedelta(days=1)
-    event_date = dt.date()
+    event_date = dt.date() if isinstance(dt, datetime) else dt
 
-    time_part = dt.strftime("%-I:%M %p") if hasattr(dt, "strftime") else ""
+    time_part = dt.strftime("%I:%M %p").lstrip("0") if isinstance(dt, datetime) else ""
 
     if event_date == today:
-        return f"Today, {time_part}"
+        return f"Today, {time_part}" if time_part else "Today"
     elif event_date == yesterday:
-        return f"Yesterday, {time_part}"
+        return f"Yesterday, {time_part}" if time_part else "Yesterday"
     elif event_date.year == today.year:
-        return f"{dt.strftime('%b %-d')}, {time_part}"
+        day_str = f"{dt.strftime('%b')} {event_date.day}"
+        return f"{day_str}, {time_part}" if time_part else day_str
     else:
-        return f"{dt.strftime('%b %-d, %Y')}, {time_part}"
+        day_str = f"{dt.strftime('%b')} {event_date.day}, {event_date.year}"
+        return f"{day_str}, {time_part}" if time_part else day_str
 
 
 def mask_ip_address(ip):
