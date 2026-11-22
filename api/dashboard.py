@@ -655,8 +655,9 @@ def get_security_checklist(uid):
 
 def get_user_profile(uid):
     """Retrieve comprehensive user profile for the dashboard."""
+    from api.rbac import ROLES
     u_rows = execute_query(
-        "SELECT uid, username, email, full_name, phone, c_date FROM users WHERE uid = %s",
+        "SELECT uid, username, email, full_name, phone, c_date, role FROM users WHERE uid = %s",
         (uid,)
     )
     if not isinstance(u_rows, list) or len(u_rows) == 0 or not isinstance(u_rows[0], dict):
@@ -692,6 +693,9 @@ def get_user_profile(uid):
             pwd_changed = None
     days_ago = (datetime.now() - pwd_changed).days if isinstance(pwd_changed, datetime) else 30
 
+    assigned_role = u.get("role") or "user"
+    resolved_role = ROLES.get(assigned_role, sec.get("role") or "End user")
+
     return {
         "uid": u["uid"],
         "username": u["username"],
@@ -700,7 +704,7 @@ def get_user_profile(uid):
         "initials": initials,
         "phone": u.get("phone") or "",
         "department": sec.get("department") or "Engineering",
-        "role": sec.get("role") or "End user",
+        "role": resolved_role,
         "joined": joined_formatted,
         "security": {
             "mfa_enabled": bool(sec.get("mfa_enabled", True)),

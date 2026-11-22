@@ -481,7 +481,22 @@ def admin_update_user_role(target_uid):
         if not target_user:
             return jsonify({"success": False, "message": "Target user not found"}), 404
 
-        execute_query("UPDATE users SET role = %s WHERE uid = %s", (new_role, target_uid))
+        # Prevent lockout: Cannot demote the last remaining admin
+        if target_uid == g.user["uid"] and new_role != "admin":
+            admin_count_res = execute_query("SELECT COUNT(*) as count FROM users WHERE role = 'admin'")
+            admin_count = admin_count_res[0].get("count", 0) if (isinstance(admin_count_res, list) and len(admin_count_res) > 0 and isinstance(admin_count_res[0], dict)) else 1
+            if admin_count <= 1:
+                return jsonify({
+                    "success": False,
+                    "message": "Cannot demote the last remaining administrator."
+                }), 400
+
+        res = execute_query("UPDATE users SET role = %s WHERE uid = %s", (new_role, target_uid))
+        if isinstance(res, str) and res.startswith("Error:"):
+            return jsonify({"message": f"Database error: {res}"}), 500
+
+        # Synchronize role in user_security_settings as well
+        execute_query("UPDATE user_security_settings SET role = %s WHERE uid = %s", (ROLES.get(new_role, "End user"), target_uid))
         log_security_event(
             "ADMIN_ROLE_CHANGE",
             uid=g.user["uid"],
