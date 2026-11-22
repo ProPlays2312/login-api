@@ -222,7 +222,15 @@ def login():
             safe_print(f"Session tracking notice: {e}")
 
         log_security_event("LOGIN_SUCCESS", uid=uid, details=f"username={user}")
-        return jsonify({"message": "Login successful", "token": s_token})
+        response = jsonify({"message": "Login successful", "token": s_token})
+        response.set_cookie(
+            "token",
+            s_token,
+            httponly=True,
+            samesite="Lax",
+            max_age=int(os.getenv("TOKEN_EXPIRATION", "3600") or 3600)
+        )
+        return response, 200
     except Exception as e:
         safe_print(f"Login token error: {e}")
         return jsonify({"message": f"Error: {e}"}), 500
@@ -358,7 +366,7 @@ def verify_otp_endpoint():
             safe_print(f"OTP session tracking notice: {e}")
 
         log_security_event("OTP_VERIFY_SUCCESS", uid=uid, details=f"username={username}")
-        return jsonify({
+        response = jsonify({
             "message": "OTP login successful",
             "token": s_token,
             "user": {
@@ -366,7 +374,15 @@ def verify_otp_endpoint():
                 "username": username,
                 "email": user.get("email")
             }
-        }), 200
+        })
+        response.set_cookie(
+            "token",
+            s_token,
+            httponly=True,
+            samesite="Lax",
+            max_age=int(os.getenv("TOKEN_EXPIRATION", "3600") or 3600)
+        )
+        return response, 200
     except Exception as e:
         safe_print(f"OTP token generation error: {e}")
         return jsonify({"message": f"Error: {e}"}), 500
