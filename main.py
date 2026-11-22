@@ -46,7 +46,20 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY") or os.getenv("TOKEN_SECRET", "vault-auth-secret-key-change-in-production")
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # Enforce 1 MB request body limit
 
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+if cors_origins_env:
+    allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+else:
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+    ]
+
+CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
 
 @app.after_request
