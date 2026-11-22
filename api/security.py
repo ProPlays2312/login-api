@@ -43,12 +43,14 @@ def log_security_event(event_type, uid=None, ip=None, details=None):
 
 # ─── In-Memory Rate Limiter ────────────────────────────────────────────────────
 _rate_buckets = defaultdict(list)
+_last_cleanup = 0.0
 
 
 def _get_client_ip():
     try:
         xff = request.headers.get("X-Forwarded-For", "")
         if xff:
+            # Client IP is the first non-empty component
             return xff.split(",")[0].strip()
         return request.remote_addr or "127.0.0.1"
     except Exception:
@@ -60,16 +62,25 @@ def rate_limit(max_requests=10, window_seconds=60, key_prefix="rl"):
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
+            global _last_cleanup
             ip = _get_client_ip()
             bucket_key = f"{key_prefix}:{ip}"
             now = time.time()
             cutoff = now - window_seconds
 
-            # Filter old requests
-            _rate_buckets[bucket_key] = [t for t in _rate_buckets[bucket_key] if t > cutoff]
+            # Periodic global eviction of stale keys every 60 seconds to prevent unbounded memory growth
+            if now - _last_cleanup > 60:
+                _last_cleanup = now
+                stale_keys = [k for k, timestamps in _rate_buckets.items() if not timestamps or max(timestamps) <= cutoff]
+                for k in stale_keys:
+                    _rate_buckets.pop(k, None)
 
-            if len(_rate_buckets[bucket_key]) >= max_requests:
-                oldest = _rate_buckets[bucket_key][0]
+            # Filter old requests in current bucket
+            valid_requests = [t for t in _rate_buckets.get(bucket_key, []) if t > cutoff]
+            _rate_buckets[bucket_key] = valid_requests
+
+            if len(valid_requests) >= max_requests:
+                oldest = valid_requests[0]
                 retry_after = max(1, int(window_seconds - (now - oldest)))
                 log_security_event("RATE_LIMIT_EXCEEDED", ip=ip, details=f"prefix={key_prefix} endpoint={request.path}")
                 resp = jsonify({
