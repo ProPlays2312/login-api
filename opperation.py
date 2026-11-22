@@ -177,6 +177,12 @@ def create_otp(identifier, expires_in_seconds=300):
     otp_hash = hashlib.sha256(f"{uid}:{otp_code}".encode()).hexdigest()
     expires_at = now + timedelta(seconds=expires_in_seconds)
 
+    # Invalidate any existing unused OTPs for this user to prevent concurrent valid OTPs
+    try:
+        execute_query("UPDATE otps SET used = TRUE WHERE uid = %s AND used = FALSE", (uid,))
+    except Exception as e:
+        safe_print(f"[OTP Invalidate Previous Notice]: {e}")
+
     query = """
     INSERT INTO otps (uid, email, otp_code, otp_hash, created_at, expires_at, used, attempts)
     VALUES (%s, %s, %s, %s, %s, %s, FALSE, 0)
