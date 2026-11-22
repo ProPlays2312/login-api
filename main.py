@@ -140,6 +140,21 @@ def create_user():
     except ValueError as ve:
         return jsonify({"message": f"Invalid username: {ve}"}), 400
 
+    # Sanitize optional full_name / phone if provided
+    raw_name = data.get("fullName") or data.get("full_name") or data.get("name")
+    if raw_name:
+        try:
+            data["full_name"] = sanitize_string(raw_name, max_length=100)
+        except ValueError as ve:
+            return jsonify({"message": f"Invalid name: {ve}"}), 400
+
+    phone = data.get("phone")
+    if phone:
+        try:
+            data["phone"] = sanitize_string(phone, max_length=20)
+        except ValueError as ve:
+            return jsonify({"message": f"Invalid phone: {ve}"}), 400
+
     try:
         result = register(data)
         if result is False:
