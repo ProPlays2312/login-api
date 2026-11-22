@@ -92,6 +92,7 @@ def create_dashboard_tables():
 
         # Create indexes for fast user lookup
         execute_query("CREATE INDEX IF NOT EXISTS idx_sessions_uid ON active_sessions(uid);")
+        execute_query("CREATE INDEX IF NOT EXISTS idx_sessions_token ON active_sessions(session_token);")
         execute_query("CREATE INDEX IF NOT EXISTS idx_sessions_active ON active_sessions(uid, is_active);")
         execute_query("CREATE INDEX IF NOT EXISTS idx_activity_uid ON login_activity(uid);")
         execute_query("CREATE INDEX IF NOT EXISTS idx_apps_uid ON connected_apps(uid);")
