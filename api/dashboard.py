@@ -715,6 +715,8 @@ def update_security_settings(uid, data):
     if not isinstance(data, dict):
         return False, "Invalid payload"
 
+    from api.security import validate_email
+
     recovery_email = data.get("recovery_email")
     mfa_enabled = data.get("mfa_enabled")
 
@@ -722,8 +724,16 @@ def update_security_settings(uid, data):
     params = []
 
     if recovery_email is not None:
-        updates.append("recovery_email = %s, recovery_email_verified = TRUE")
-        params.append(recovery_email.strip())
+        rec_str = str(recovery_email).strip()
+        if rec_str:
+            try:
+                rec_str = validate_email(rec_str)
+            except ValueError as ve:
+                return False, f"Invalid recovery email: {ve}"
+            updates.append("recovery_email = %s, recovery_email_verified = FALSE")
+            params.append(rec_str)
+        else:
+            updates.append("recovery_email = NULL, recovery_email_verified = FALSE")
 
     if mfa_enabled is not None:
         updates.append("mfa_enabled = %s")
@@ -734,5 +744,7 @@ def update_security_settings(uid, data):
 
     params.append(uid)
     query = f"UPDATE user_security_settings SET {', '.join(updates)} WHERE uid = %s"
-    execute_query(query, tuple(params))
+    res = execute_query(query, tuple(params))
+    if isinstance(res, str) and res.startswith("Error:"):
+        return False, f"Database error: {res}"
     return True, "Security settings updated successfully"
