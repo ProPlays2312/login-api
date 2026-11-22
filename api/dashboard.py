@@ -406,9 +406,11 @@ def get_active_sessions_endpoint_data(uid, current_token=None):
         {
             "session_id": s["session_id"],
             "device_name": s["device_name"],
+            "device_type": s.get("device_type", "desktop"),
             "browser": s["browser"],
             "os": s.get("os", "Unknown"),
             "location": s.get("location", "Bengaluru, India"),
+            "created_at": s.get("created_at"),
             "last_active": s["last_active"],
             "is_current": s.get("is_current", False),
             "is_active": True
