@@ -20,6 +20,24 @@ from api.security import (
 )
 from api.rbac import require_role, require_admin, get_user_role, is_admin, ROLES, VALID_ROLES
 from api.db import execute_query
+from api.admin_db import init_admin_db
+from api.admin import (
+    get_admin_dashboard_stats,
+    get_all_users_admin,
+    admin_create_user,
+    admin_update_user,
+    admin_toggle_user_status,
+    admin_delete_user,
+    get_admin_all_sessions,
+    admin_revoke_session,
+    admin_revoke_all_user_sessions,
+    get_admin_login_activity,
+    get_audit_logs,
+    get_admin_settings,
+    update_admin_settings,
+    get_roles_overview,
+    record_audit_log,
+)
 from api.dashboard import (
     get_dashboard_overview,
     get_recent_login_activity,
@@ -495,12 +513,42 @@ def get_current_user_role():
         return jsonify({"message": "Error retrieving role"}), 500
 
 
+@app.route("/api/admin/dashboard/stats", methods=["GET"])
+@require_auth
+@require_admin
+def admin_dashboard_stats():
+    """Admin: aggregate stats for dashboard overview cards."""
+    try:
+        stats = get_admin_dashboard_stats()
+        record_audit_log("ADMIN_STATS_VIEW", actor_uid=g.user["uid"],
+                         actor_username=g.user.get("username"), ip_address=request.remote_addr)
+        return jsonify(stats), 200
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
 @app.route("/api/admin/users", methods=["GET"])
 @require_auth
 @require_admin
 def admin_list_users():
-    """Enterprise Admin: retrieve employee user directory with roles."""
+    """Enterprise Admin: retrieve employee user directory with roles and filters."""
     try:
+        page_arg = request.args.get("page")
+        search_arg = request.args.get("search")
+        role_arg = request.args.get("role")
+        status_arg = request.args.get("status")
+        paginate_arg = request.args.get("paginate")
+
+        # If pagination or filtering requested by Admin Dashboard
+        if page_arg is not None or paginate_arg == "true" or search_arg or (role_arg and role_arg != "all") or (status_arg and status_arg != "all"):
+            page = max(1, int(page_arg or 1))
+            per_page = min(100, max(5, int(request.args.get("per_page", 20) or 20)))
+            result = get_all_users_admin(search_arg, role_arg, status_arg, page, per_page)
+            record_audit_log("ADMIN_DIRECTORY_ACCESSED", actor_uid=g.user["uid"],
+                             actor_username=g.user.get("username"), ip_address=request.remote_addr)
+            return jsonify(result), 200
+
+        # Unpaginated list for backward compatibility with existing tests
         user_list = get_users(None)
         if user_list is None:
             return jsonify({"message": "Error getting users"}), 500
@@ -513,7 +561,7 @@ def admin_list_users():
                 "uid": uid,
                 "username": u.get("username"),
                 "email": u.get("email"),
-                "full_name": u.get("full_name"),
+                "full_name": u.get("full_name") or u.get("username"),
                 "is_active": u.get("is_active", True),
                 "role": role,
                 "role_title": ROLES.get(role, "End User")
@@ -523,6 +571,220 @@ def admin_list_users():
     except Exception as e:
         safe_print(f"[Admin List Users]: {e}")
         return jsonify({"message": "Error retrieving users"}), 500
+
+
+@app.route("/api/admin/users", methods=["POST"])
+@require_auth
+@require_admin
+def admin_add_user():
+    """Admin: create a new user."""
+    try:
+        data = request.get_json() or {}
+        username = str(data.get("username", "")).strip()
+        email = str(data.get("email", "")).strip()
+        password = str(data.get("password", "")).strip()
+        full_name = data.get("full_name") or data.get("fullName")
+        phone = data.get("phone")
+        role = data.get("role", "user")
+
+        if not username or not email or not password:
+            return jsonify({"success": False, "message": "username, email, and password are required"}), 400
+
+        success, result = admin_create_user(username, email, password, full_name, phone, role)
+        if success:
+            record_audit_log("ADMIN_USER_CREATED", actor_uid=g.user["uid"],
+                             actor_username=g.user.get("username"),
+                             target_username=username, ip_address=request.remote_addr)
+            log_security_event("ADMIN_USER_CREATED", uid=g.user["uid"], details=f"new_user={username}")
+            return jsonify({"success": True, "message": "User created", "user": result}), 201
+        return jsonify({"success": False, "message": result}), 400
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/users/<int:target_uid>", methods=["PUT"])
+@require_auth
+@require_admin
+def admin_edit_user(target_uid):
+    """Admin: update user fields."""
+    try:
+        data = request.get_json() or {}
+        success, msg = admin_update_user(target_uid, data, g.user["uid"])
+        if success:
+            record_audit_log("ADMIN_USER_UPDATED", actor_uid=g.user["uid"],
+                             actor_username=g.user.get("username"), target_uid=target_uid,
+                             ip_address=request.remote_addr)
+            log_security_event("ADMIN_USER_UPDATED", uid=g.user["uid"], details=f"target_uid={target_uid}")
+        return jsonify({"success": success, "message": msg}), 200 if success else 400
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/users/<int:target_uid>/status", methods=["PUT"])
+@require_auth
+@require_admin
+def admin_toggle_status(target_uid):
+    """Admin: activate or deactivate a user."""
+    try:
+        data = request.get_json() or {}
+        is_active = bool(data.get("is_active", True))
+
+        # Prevent admin from deactivating themselves
+        if target_uid == g.user["uid"] and not is_active:
+            return jsonify({"success": False, "message": "Cannot deactivate your own account"}), 400
+
+        success, msg = admin_toggle_user_status(target_uid, is_active, g.user["uid"])
+        if success:
+            action = "ADMIN_USER_ACTIVATED" if is_active else "ADMIN_USER_DEACTIVATED"
+            record_audit_log(action, actor_uid=g.user["uid"], actor_username=g.user.get("username"),
+                             target_uid=target_uid, ip_address=request.remote_addr)
+            log_security_event(action, uid=g.user["uid"], details=f"target_uid={target_uid}")
+        return jsonify({"success": success, "message": msg}), 200 if success else 404
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/users/<int:target_uid>", methods=["DELETE"])
+@require_auth
+@require_admin
+def admin_remove_user(target_uid):
+    """Admin: permanently delete a user."""
+    try:
+        # Prevent self-deletion
+        if target_uid == g.user["uid"]:
+            return jsonify({"success": False, "message": "Cannot delete your own account"}), 400
+
+        success, msg = admin_delete_user(target_uid, g.user["uid"])
+        if success:
+            record_audit_log("ADMIN_USER_DELETED", actor_uid=g.user["uid"],
+                             actor_username=g.user.get("username"), target_uid=target_uid,
+                             ip_address=request.remote_addr, details=msg)
+            log_security_event("ADMIN_USER_DELETED", uid=g.user["uid"], details=f"target_uid={target_uid}")
+        return jsonify({"success": success, "message": msg}), 200 if success else 404
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/roles", methods=["GET"])
+@require_auth
+@require_admin
+def admin_get_roles():
+    """Admin: get roles and permissions overview."""
+    try:
+        result = get_roles_overview()
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/sessions", methods=["GET"])
+@require_auth
+@require_admin
+def admin_get_sessions():
+    """Admin: list all sessions across all users."""
+    try:
+        search = request.args.get("search", "").strip() or None
+        status_filter = request.args.get("status", "all")
+        page = max(1, int(request.args.get("page", 1) or 1))
+        per_page = min(100, max(5, int(request.args.get("per_page", 20) or 20)))
+        result = get_admin_all_sessions(search, status_filter, page, per_page)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/sessions/<string:session_id>/revoke", methods=["POST"])
+@require_auth
+@require_admin
+def admin_revoke_one_session(session_id):
+    """Admin: revoke a specific session."""
+    try:
+        success, msg = admin_revoke_session(session_id, g.user["uid"])
+        if success:
+            record_audit_log("ADMIN_SESSION_REVOKED", actor_uid=g.user["uid"],
+                             actor_username=g.user.get("username"),
+                             details=f"session_id={session_id}", ip_address=request.remote_addr)
+        return jsonify({"success": success, "message": msg}), 200 if success else 404
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/users/<int:target_uid>/sessions/revoke-all", methods=["POST"])
+@require_auth
+@require_admin
+def admin_revoke_user_sessions(target_uid):
+    """Admin: revoke all sessions for a specific user."""
+    try:
+        success, msg = admin_revoke_all_user_sessions(target_uid, g.user["uid"])
+        record_audit_log("ADMIN_ALL_SESSIONS_REVOKED", actor_uid=g.user["uid"],
+                         actor_username=g.user.get("username"), target_uid=target_uid,
+                         ip_address=request.remote_addr)
+        return jsonify({"success": success, "message": msg}), 200
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/login-activity", methods=["GET"])
+@require_auth
+@require_admin
+def admin_get_login_activity():
+    """Admin: list login activity across all users."""
+    try:
+        search = request.args.get("search", "").strip() or None
+        status_filter = request.args.get("status", "all")
+        date_from = request.args.get("date_from")
+        date_to = request.args.get("date_to")
+        page = max(1, int(request.args.get("page", 1) or 1))
+        per_page = min(100, max(5, int(request.args.get("per_page", 25) or 25)))
+        result = get_admin_login_activity(search, status_filter, date_from, date_to, page, per_page)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/audit-logs", methods=["GET"])
+@require_auth
+@require_admin
+def admin_get_audit_logs():
+    """Admin: list security audit logs."""
+    try:
+        search = request.args.get("search", "").strip() or None
+        event_filter = request.args.get("event", "all")
+        page = max(1, int(request.args.get("page", 1) or 1))
+        per_page = min(100, max(5, int(request.args.get("per_page", 25) or 25)))
+        result = get_audit_logs(search, event_filter, page, per_page)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/settings", methods=["GET"])
+@require_auth
+@require_admin
+def admin_get_settings():
+    """Admin: retrieve non-secret system settings."""
+    try:
+        settings = get_admin_settings()
+        return jsonify(settings), 200
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
+
+
+@app.route("/api/admin/settings", methods=["PUT"])
+@require_auth
+@require_admin
+def admin_update_settings():
+    """Admin: update allowed system settings."""
+    try:
+        data = request.get_json() or {}
+        success, msg = update_admin_settings(data, g.user["uid"])
+        if success:
+            record_audit_log("ADMIN_SETTINGS_UPDATED", actor_uid=g.user["uid"],
+                             actor_username=g.user.get("username"), ip_address=request.remote_addr,
+                             details=f"keys={list(data.keys())}")
+        return jsonify({"success": success, "message": msg}), 200
+    except Exception as e:
+        return jsonify({"message": f"Error: {e}"}), 500
 
 
 @app.route("/api/admin/users/<int:target_uid>/role", methods=["PUT"])
@@ -769,8 +1031,10 @@ def init_app_database():
     try:
         from api.init import db_init
         from api.dashboard_db import init_dashboard_db
+        from api.admin_db import init_admin_db
         db_init()
         init_dashboard_db()
+        init_admin_db()
     except Exception as e:
         safe_print(f"Database init warning: {e}")
 
