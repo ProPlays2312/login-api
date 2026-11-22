@@ -10,6 +10,7 @@ def send_otp_email(to_email, otp_code, username=None):
     """
     import os
     import json
+    import html
     import email.utils
     import urllib.request
     import urllib.error
@@ -24,7 +25,9 @@ def send_otp_email(to_email, otp_code, username=None):
     sender_addr = sender_addr.strip() if sender_addr else plunk_from.strip()
     sender_name = sender_name.strip() if sender_name else "Vault Auth"
 
-    display_name = username or to_email
+    raw_display = username or to_email
+    display_name = html.escape(str(raw_display))
+    safe_otp = html.escape(str(otp_code))
     subject = f"{otp_code} is your Vault Auth verification code"
 
     html_content = f"""<!DOCTYPE html>
@@ -57,7 +60,7 @@ def send_otp_email(to_email, otp_code, username=None):
     </div>
     <p class=\"info\">Hello <strong>{display_name}</strong>,</p>
     <p class=\"info\">Use the following One-Time Password (OTP) to complete your login. This code is confidential and valid for <strong>5 minutes</strong>.</p>
-    <div class=\"otp-box\"><div class=\"otp-code\">{otp_code}</div></div>
+    <div class=\"otp-box\"><div class=\"otp-code\">{safe_otp}</div></div>
     <p class=\"info\">If you didn't request this login code, you can safely ignore this email.</p>
     <div class=\"footer\">&copy; Vault Auth Security &bull; Automated security notification</div>
   </div>
