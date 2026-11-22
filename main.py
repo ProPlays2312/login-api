@@ -377,7 +377,7 @@ def verify():
     auth_header = request.headers.get("Authorization")
     token = None
     if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1]
+        token = auth_header.split(" ", 1)[1].strip()
     elif request.is_json and request.get_json():
         token = request.get_json().get("token")
     elif request.args.get("token"):
@@ -385,8 +385,23 @@ def verify():
     else:
         token = session.get("token") or request.cookies.get("token")
 
-    if not token or not verify_token(token):
+    if not token:
         return jsonify({"valid": False, "message": "Invalid or expired token"}), 401
+
+    token = str(token).strip()
+    if not verify_token(token):
+        return jsonify({"valid": False, "message": "Invalid or expired token"}), 401
+
+    # Check if session has been revoked in active_sessions
+    try:
+        revoked_check = execute_query(
+            "SELECT id FROM active_sessions WHERE session_token = %s AND is_active = FALSE LIMIT 1",
+            (token,)
+        )
+        if isinstance(revoked_check, list) and len(revoked_check) > 0:
+            return jsonify({"valid": False, "message": "Session has been revoked or logged out"}), 401
+    except Exception as e:
+        safe_print(f"[Verify Session Check]: {e}")
 
     return jsonify({"valid": True, "message": "Token is valid", "token": token}), 200
 
