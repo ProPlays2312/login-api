@@ -377,9 +377,6 @@ def get_valid_active_sessions(uid, current_token=None):
                 "is_active": True
             })
 
-    if results and not has_current and current_token:
-        results[0]["is_current"] = True
-
     return results
 
 
