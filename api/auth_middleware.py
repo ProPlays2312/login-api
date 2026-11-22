@@ -159,22 +159,6 @@ def resolve_user_from_token(token):
     except Exception as e:
         safe_print(f"Token lookup note: {e}")
 
-    # Fallback: check if md5 matches any active user
-    try:
-        users = execute_query("SELECT uid, username, email, full_name, is_active FROM users WHERE is_active = TRUE")
-        if isinstance(users, list):
-            import os, hashlib
-            secret = os.getenv("TOKEN_SECRET", "default-secret-token")
-            for u in users:
-                uname = u.get("username") or ""
-                uid = u.get("uid") or ""
-                h = hashlib.md5(f"{uname}:{uid}".encode())
-                h.update(secret.encode())
-                if h.hexdigest() == token_md5:
-                    return u
-    except Exception as e:
-        safe_print(f"User hash check note: {e}")
-
     return None
 
 
