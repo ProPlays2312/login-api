@@ -501,23 +501,6 @@ def get_recent_login_activity(uid, limit=10, filter_status=None):
                 "created_at": r["created_at"].isoformat() if hasattr(r["created_at"], "isoformat") else str(r["created_at"])
             })
 
-    # If no activity logged yet, provide initial activity
-    if len(results) == 0:
-        results = [
-            {
-                "id": 1,
-                "device_name": 'MacBook Pro 16"',
-                "device_type": "laptop",
-                "browser": "Chrome 131",
-                "location": "Bengaluru, India",
-                "meta": "Chrome • Bengaluru, India",
-                "ip_address": "103.21.58.xx",
-                "status": "Success",
-                "time_formatted": "Today, 9:42 AM",
-                "created_at": datetime.now().isoformat()
-            }
-        ]
-
     return results
 
 
