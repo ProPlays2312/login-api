@@ -599,19 +599,30 @@ def get_security_checklist(uid):
         "SELECT mfa_enabled, recovery_email, recovery_email_verified, password_strength, password_last_changed FROM user_security_settings WHERE uid = %s",
         (uid,)
     )
+    u_res = execute_query("SELECT email FROM users WHERE uid = %s", (uid,))
+    user_email = u_res[0].get("email") if (isinstance(u_res, list) and len(u_res) > 0 and isinstance(u_res[0], dict)) else ""
+
     mfa = True
-    rec_email = "alex.backup@gmail.com"
-    rec_verified = True
+    rec_email = user_email
+    rec_verified = False
     pwd_strength = "Strong password"
 
-    if sec_rows and len(sec_rows) > 0:
+    if isinstance(sec_rows, list) and len(sec_rows) > 0 and isinstance(sec_rows[0], dict):
         s = sec_rows[0]
         mfa = bool(s.get("mfa_enabled", True))
-        rec_email = s.get("recovery_email") or rec_email
-        rec_verified = bool(s.get("recovery_email_verified", True))
-        pwd_strength = f"{s.get('password_strength', 'Strong')} password"
+        rec_email = s.get("recovery_email") or user_email
+        rec_verified = bool(s.get("recovery_email_verified", False))
+        raw_pwd = s.get("password_strength", "Strong")
+        pwd_strength = f"{raw_pwd} password"
 
     sec_score = calculate_security_score(uid)
+    pwd_lower = pwd_strength.lower()
+    if "strong" in pwd_lower:
+        pwd_badge = "Good"
+    elif "medium" in pwd_lower:
+        pwd_badge = "Fair"
+    else:
+        pwd_badge = "Weak"
 
     return {
         "badge": sec_score["badge"],
@@ -635,8 +646,8 @@ def get_security_checklist(uid):
                 "key": "password_strength",
                 "title": "Password strength",
                 "description": pwd_strength,
-                "enabled": "strong" in pwd_strength.lower(),
-                "badge": "Good"
+                "enabled": "strong" in pwd_lower,
+                "badge": pwd_badge
             }
         ]
     }
@@ -648,7 +659,7 @@ def get_user_profile(uid):
         "SELECT uid, username, email, full_name, phone, c_date FROM users WHERE uid = %s",
         (uid,)
     )
-    if not u_rows or len(u_rows) == 0:
+    if not isinstance(u_rows, list) or len(u_rows) == 0 or not isinstance(u_rows[0], dict):
         return None
 
     u = u_rows[0]
@@ -656,22 +667,29 @@ def get_user_profile(uid):
         "SELECT department, role, joined_date, recovery_email, mfa_enabled, password_last_changed FROM user_security_settings WHERE uid = %s",
         (uid,)
     )
-    sec = sec_rows[0] if (sec_rows and len(sec_rows) > 0) else {}
+    sec = sec_rows[0] if (isinstance(sec_rows, list) and len(sec_rows) > 0 and isinstance(sec_rows[0], dict)) else {}
 
-    full_name = u.get("full_name") or u.get("username") or "Alex Morgan"
+    full_name = u.get("full_name") or u.get("username") or f"User {uid}"
     # Compute 2-letter initials
     parts = full_name.strip().split()
     if len(parts) >= 2:
         initials = (parts[0][0] + parts[1][0]).upper()
     elif len(parts) == 1 and len(parts[0]) >= 2:
         initials = parts[0][:2].upper()
+    elif len(parts) == 1 and len(parts[0]) == 1:
+        initials = (parts[0][0] + "U").upper()
     else:
         initials = "AM"
 
     joined = sec.get("joined_date") or u.get("c_date")
-    joined_formatted = joined.strftime("%B %d, %Y") if hasattr(joined, "strftime") else str(joined or "March 15, 2025")
+    joined_formatted = joined.strftime("%B %d, %Y") if hasattr(joined, "strftime") else str(joined or "N/A")
 
     pwd_changed = sec.get("password_last_changed")
+    if isinstance(pwd_changed, str):
+        try:
+            pwd_changed = datetime.fromisoformat(pwd_changed)
+        except Exception:
+            pwd_changed = None
     days_ago = (datetime.now() - pwd_changed).days if isinstance(pwd_changed, datetime) else 30
 
     return {
@@ -680,7 +698,7 @@ def get_user_profile(uid):
         "email": u["email"],
         "full_name": full_name,
         "initials": initials,
-        "phone": u.get("phone") or "+91 98765 43210",
+        "phone": u.get("phone") or "",
         "department": sec.get("department") or "Engineering",
         "role": sec.get("role") or "End user",
         "joined": joined_formatted,
