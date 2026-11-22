@@ -764,15 +764,23 @@ def user_profile():
         return jsonify({"message": f"Error retrieving profile: {e}"}), 500
 
 
-if __name__ == "__main__":
-    from api.init import db_init
-    from api.dashboard_db import init_dashboard_db
+def init_app_database():
+    """Ensure database tables and columns are initialized across standalone and WSGI runtimes."""
     try:
+        from api.init import db_init
+        from api.dashboard_db import init_dashboard_db
         db_init()
         init_dashboard_db()
     except Exception as e:
         safe_print(f"Database init warning: {e}")
 
+
+# Automatically initialize schema on non-testing startup (Gunicorn / WSGI / Standalone)
+if not os.getenv("TESTING") and not app.config.get("TESTING"):
+    init_app_database()
+
+
+if __name__ == "__main__":
     debug_mode = os.getenv("SERVER_DEBUG", "False").lower() in ("true", "1", "yes")
     host_addr = os.getenv("SERVER_HOST", "0.0.0.0") or "0.0.0.0"
     port_env = os.getenv("SERVER_PORT", "5000")
