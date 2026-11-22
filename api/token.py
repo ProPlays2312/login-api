@@ -20,7 +20,7 @@ def generate_token(data, uid=None):
         user_uid = uid if uid is not None else ""
 
     secret = os.getenv("TOKEN_SECRET", "default-secret-token")
-    md5sum = hashlib.md5(f"{username}{user_uid}".encode())
+    md5sum = hashlib.md5(f"{username}:{user_uid}".encode())
     md5sum.update(secret.encode())
     md5sum = md5sum.hexdigest()
     return md5sum, c_date

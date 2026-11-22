@@ -168,7 +168,7 @@ def resolve_user_from_token(token):
             for u in users:
                 uname = u.get("username") or ""
                 uid = u.get("uid") or ""
-                h = hashlib.md5(f"{uname}{uid}".encode())
+                h = hashlib.md5(f"{uname}:{uid}".encode())
                 h.update(secret.encode())
                 if h.hexdigest() == token_md5:
                     return u
