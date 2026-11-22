@@ -97,7 +97,7 @@ def ensure_default_user_dashboard_data(uid, user=None):
     """Ensure newly created or existing user has initial settings, apps, and sessions."""
     # 1. Security Settings
     sec_rows = execute_query("SELECT id FROM user_security_settings WHERE uid = %s", (uid,))
-    if not sec_rows or len(sec_rows) == 0:
+    if not isinstance(sec_rows, list) or len(sec_rows) == 0:
         recovery = (user.get("email") if user else None) or f"user_{uid}@backup.vault.io"
         execute_query("""
             INSERT INTO user_security_settings (
@@ -109,7 +109,7 @@ def ensure_default_user_dashboard_data(uid, user=None):
 
     # 2. Connected Apps
     app_rows = execute_query("SELECT id FROM connected_apps WHERE uid = %s", (uid,))
-    if not app_rows or len(app_rows) == 0:
+    if not isinstance(app_rows, list) or len(app_rows) == 0:
         for app in DEFAULT_CONNECTED_APPS:
             execute_query("""
                 INSERT INTO connected_apps (
@@ -208,7 +208,7 @@ def calculate_security_score(uid):
         "SELECT mfa_enabled, recovery_email_verified, password_strength, password_last_changed FROM user_security_settings WHERE uid = %s",
         (uid,)
     )
-    if sec_rows and len(sec_rows) > 0:
+    if isinstance(sec_rows, list) and len(sec_rows) > 0 and isinstance(sec_rows[0], dict):
         sec = sec_rows[0]
         # 1. Multi-factor authentication (+25)
         if sec.get("mfa_enabled"):
@@ -255,7 +255,7 @@ def calculate_security_score(uid):
         "SELECT COUNT(*) as cnt FROM login_activity WHERE uid = %s AND status IN ('Failed', 'Blocked') AND created_at >= %s",
         (uid, week_ago)
     )
-    if bad_logins and len(bad_logins) > 0 and (bad_logins[0].get("cnt") or 0) == 0:
+    if isinstance(bad_logins, list) and len(bad_logins) > 0 and isinstance(bad_logins[0], dict) and (bad_logins[0].get("cnt") or 0) == 0:
         score += 5
         breakdown["activity_clean"] = 5
     else:
@@ -434,7 +434,7 @@ def get_dashboard_overview(uid, current_token=None):
         "SELECT COUNT(*) as cnt FROM connected_apps WHERE uid = %s AND is_active = TRUE",
         (uid,)
     )
-    connected_apps_count = apps_rows[0].get("cnt", 0) if apps_rows else 0
+    connected_apps_count = apps_rows[0].get("cnt", 0) if (isinstance(apps_rows, list) and len(apps_rows) > 0 and isinstance(apps_rows[0], dict)) else 0
 
     # Security score
     sec_info = calculate_security_score(uid)
