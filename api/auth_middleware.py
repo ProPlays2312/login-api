@@ -111,16 +111,14 @@ def get_token_from_request():
 
 
 def resolve_user_from_token(token):
-    """Resolve user record from token, checking active sessions or tokens table."""
+    """Resolve user record from token, strictly validating against active sessions."""
     if not token:
         return None
 
     if not verify_token(token):
         return None
 
-    token_md5 = token.split(".")[0] if "." in token else token
-
-    # Check active_sessions first (authoritative for session status and revocation)
+    # Check active_sessions (authoritative for session status, expiration, and revocation)
     try:
         session_query = """
         SELECT s.id as session_id, s.uid, s.is_active as session_active, u.username, u.email, u.full_name, u.is_active
@@ -140,24 +138,6 @@ def resolve_user_from_token(token):
                 return sess
     except Exception as e:
         safe_print(f"Session lookup note: {e}")
-
-    # Check tokens table
-    try:
-        token_query = """
-        SELECT t.uid, u.username, u.email, u.full_name, u.is_active
-        FROM tokens t
-        JOIN users u ON t.uid = u.uid
-        WHERE t.md5 = %s
-        ORDER BY t.uid DESC
-        LIMIT 1
-        """
-        rows = execute_query(token_query, (token_md5,))
-        if isinstance(rows, list) and len(rows) > 0:
-            user = rows[0]
-            if user.get("is_active") is not False:
-                return user
-    except Exception as e:
-        safe_print(f"Token lookup note: {e}")
 
     return None
 

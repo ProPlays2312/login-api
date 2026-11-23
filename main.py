@@ -354,6 +354,78 @@ def send_otp():
     return jsonify(response_data), 200
 
 
+@app.route("/api/forgot-password", methods=["POST"])
+@app.route("/api/auth/forgot-password", methods=["POST"])
+@rate_limit(max_requests=10, window_seconds=60, key_prefix="forgot_pw")
+def forgot_password():
+    data = request.get_json() if request.is_json else {}
+    email = data.get("email") or data.get("identifier") or data.get("login")
+    if not email:
+        return jsonify({"message": "Email address is required", "success": False}), 400
+
+    email = str(email).strip().lower()
+    user_rec = get_users(email)
+
+    success_resp = {
+        "success": True,
+        "message": f"If an account with {email} exists, password reset instructions have been sent."
+    }
+
+    if not user_rec or len(user_rec) == 0:
+        return jsonify(success_resp), 200
+
+    user = user_rec[0]
+    if user.get("is_active") is False:
+        return jsonify(success_resp), 200
+
+    otp_info, err = create_otp(email)
+    if err:
+        safe_print(f"[ForgotPassword Notice]: {err}")
+
+    log_security_event("PASSWORD_RESET_REQUEST", uid=user.get("uid"), details=f"email={email}")
+    return jsonify(success_resp), 200
+
+
+@app.route("/api/reset-password", methods=["POST"])
+@app.route("/api/auth/reset-password", methods=["POST"])
+@rate_limit(max_requests=10, window_seconds=60, key_prefix="reset_pw")
+def reset_password():
+    data = request.get_json() if request.is_json else {}
+    email = data.get("email") or data.get("identifier")
+    otp_code = data.get("otp") or data.get("code")
+    new_password = data.get("password") or data.get("new_password")
+
+    if not email or not otp_code or not new_password:
+        return jsonify({"message": "Email, verification code, and new password are required", "success": False}), 400
+
+    is_valid, msg = validate_password_strength(new_password)
+    if not is_valid:
+        return jsonify({"message": msg, "success": False}), 400
+
+    verified, v_err = verify_otp(email, otp_code)
+    if not verified:
+        return jsonify({"message": v_err or "Invalid or expired verification code", "success": False}), 400
+
+    try:
+        from werkzeug.security import generate_password_hash
+        hashed = generate_password_hash(new_password)
+        res = execute_query("UPDATE users SET password = %s WHERE email = %s OR username = %s", (hashed, email, email))
+        if isinstance(res, str) and res.startswith("Error:"):
+            return jsonify({"message": "Database update failed", "success": False}), 500
+
+        user_rec = get_users(email)
+        uid = user_rec[0].get("uid") if user_rec else 0
+        if uid:
+            execute_query("UPDATE active_sessions SET is_active = FALSE, revoked_at = NOW() WHERE uid = %s", (uid,))
+
+        log_security_event("PASSWORD_RESET_SUCCESS", uid=uid, details=f"email={email}")
+        return jsonify({"message": "Password successfully reset. Please log in with your new password.", "success": True}), 200
+    except Exception as e:
+        safe_print(f"[Password Reset Error]: {e}")
+        return jsonify({"message": "Password reset failed. Please try again.", "success": False}), 500
+
+
+
 @app.route("/api/otp/verify", methods=["POST"])
 @app.route("/api/login/otp/verify", methods=["POST"])
 @app.route("/api/login/otp", methods=["POST"])
