@@ -55,6 +55,14 @@ from api.dashboard import (
     create_user_session,
     ensure_default_user_dashboard_data,
 )
+from api.webauthn_service import (
+    get_passkey_registration_options,
+    verify_and_save_passkey_registration,
+    get_passkey_authentication_options,
+    verify_passkey_authentication,
+    get_user_passkeys,
+    delete_user_passkey,
+)
 from flask import g
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
@@ -1026,15 +1034,181 @@ def user_profile():
         return jsonify({"message": f"Error retrieving profile: {e}"}), 500
 
 
+# ─── WebAuthn / FIDO2 Passkey Endpoints ──────────────────────────────────────
+
+@app.route("/api/webauthn/register/options", methods=["POST"])
+@require_auth
+def webauthn_register_options():
+    """Generate registration challenge and credential creation options for authenticated user."""
+    try:
+        ensure_default_user_dashboard_data(g.user["uid"], g.user)
+        options = get_passkey_registration_options(g.user)
+        return jsonify(options), 200
+    except Exception as e:
+        safe_print(f"WebAuthn register options error: {e}")
+        return jsonify({"message": f"Failed to generate passkey options: {e}"}), 500
+
+
+@app.route("/api/webauthn/register/verify", methods=["POST"])
+@require_auth
+def webauthn_register_verify():
+    """Verify and persist newly registered passkey credential."""
+    try:
+        ensure_default_user_dashboard_data(g.user["uid"], g.user)
+        data = request.get_json() if request.is_json else {}
+        if not data:
+            return jsonify({"message": "Invalid or missing WebAuthn registration payload"}), 400
+
+        # Support both wrapped { credential: {...}, deviceName: ... } and direct credential object
+        if "credential" in data and isinstance(data["credential"], dict):
+            credential_payload = data["credential"]
+            device_name = data.get("deviceName") or data.get("device_name")
+        else:
+            credential_payload = data
+            device_name = data.get("deviceName") or data.get("device_name")
+
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "127.0.0.1").split(",")[0].strip()
+        success, msg, cred_info = verify_and_save_passkey_registration(
+            user=g.user,
+            credential_payload=credential_payload,
+            device_name=device_name,
+            client_ip=client_ip
+        )
+
+        if not success:
+            return jsonify({"success": False, "message": msg}), 400
+
+        return jsonify({
+            "success": True,
+            "message": msg,
+            "credential": cred_info
+        }), 200
+    except Exception as e:
+        safe_print(f"WebAuthn register verify error: {e}")
+        return jsonify({"success": False, "message": f"Server error verifying passkey: {e}"}), 500
+
+
+@app.route("/api/webauthn/login/options", methods=["POST"])
+@rate_limit(max_requests=30, window_seconds=60, key_prefix="webauthn_login_options")
+def webauthn_login_options():
+    """Generate authentication options for Passkey login."""
+    try:
+        data = request.get_json(silent=True) or {}
+        identifier = (
+            data.get("identifier")
+            or data.get("username")
+            or data.get("email")
+            or request.args.get("identifier")
+            or request.args.get("username")
+        )
+        options = get_passkey_authentication_options(identifier=identifier)
+        return jsonify(options), 200
+    except Exception as e:
+        safe_print(f"WebAuthn login options error: {e}")
+        return jsonify({"message": f"Failed to generate login options: {e}"}), 500
+
+
+@app.route("/api/webauthn/login/verify", methods=["POST"])
+@rate_limit(max_requests=15, window_seconds=60, key_prefix="webauthn_login_verify")
+def webauthn_login_verify():
+    """Verify passkey assertion response and issue authenticated session."""
+    try:
+        data = request.get_json() if request.is_json else {}
+        if not data:
+            return jsonify({"message": "Invalid or missing WebAuthn login payload"}), 400
+
+        credential_payload = data.get("credential") if ("credential" in data and isinstance(data["credential"], dict)) else data
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "127.0.0.1").split(",")[0].strip()
+
+        success, msg, user = verify_passkey_authentication(
+            credential_payload=credential_payload,
+            client_ip=client_ip
+        )
+
+        if not success or not user:
+            return jsonify({"success": False, "message": msg}), 401
+
+        uid = user.get("uid")
+        username = user.get("username")
+        user_role = get_user_role(uid)
+
+        token_res = generate_token({"username": username, "uid": uid, "role": user_role})
+        raw_token = token_res[0] if isinstance(token_res, tuple) else token_res
+        s_token = session_token(raw_token)
+        session["token"] = s_token
+
+        # Create session tracking and login activity records
+        try:
+            record_login_activity(uid, request, status="Success")
+            create_user_session(uid, s_token, request)
+            ensure_default_user_dashboard_data(uid, user)
+        except Exception as e:
+            safe_print(f"WebAuthn session tracking warning: {e}")
+
+        response = jsonify({
+            "success": True,
+            "message": "Passkey authentication successful",
+            "token": s_token,
+            "user": {
+                "uid": uid,
+                "username": username,
+                "email": user.get("email"),
+                "role": user_role,
+                "fullName": user.get("full_name") or username,
+            }
+        })
+        response.set_cookie(
+            "token",
+            s_token,
+            httponly=True,
+            samesite="Lax",
+            max_age=int(os.getenv("TOKEN_EXPIRATION", "3600") or 3600)
+        )
+        return response, 200
+
+    except Exception as e:
+        safe_print(f"WebAuthn login verify error: {e}")
+        return jsonify({"success": False, "message": f"Authentication failed: {e}"}), 500
+
+
+@app.route("/api/webauthn/credentials", methods=["GET"])
+@require_auth
+def webauthn_get_credentials():
+    """Retrieve all registered passkeys for the authenticated user."""
+    try:
+        credentials = get_user_passkeys(g.user["uid"])
+        return jsonify({"credentials": credentials}), 200
+    except Exception as e:
+        safe_print(f"WebAuthn get credentials error: {e}")
+        return jsonify({"message": f"Error retrieving passkeys: {e}"}), 500
+
+
+@app.route("/api/webauthn/credentials/<int:cred_id>", methods=["DELETE"])
+@require_auth
+def webauthn_delete_credential(cred_id):
+    """Delete a registered passkey credential belonging to the authenticated user."""
+    try:
+        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "127.0.0.1").split(",")[0].strip()
+        success, msg = delete_user_passkey(g.user["uid"], cred_id, client_ip)
+        if not success:
+            return jsonify({"success": False, "message": msg}), 400
+        return jsonify({"success": True, "message": msg}), 200
+    except Exception as e:
+        safe_print(f"WebAuthn delete credential error: {e}")
+        return jsonify({"success": False, "message": f"Error deleting passkey: {e}"}), 500
+
+
 def init_app_database():
     """Ensure database tables and columns are initialized across standalone and WSGI runtimes."""
     try:
         from api.init import db_init
         from api.dashboard_db import init_dashboard_db
         from api.admin_db import init_admin_db
+        from api.webauthn_db import init_webauthn_db
         db_init()
         init_dashboard_db()
         init_admin_db()
+        init_webauthn_db()
     except Exception as e:
         safe_print(f"Database init warning: {e}")
 
