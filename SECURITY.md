@@ -167,7 +167,7 @@ pytest -v
 
 ### Running the Dedicated Security Test Suite
 ```bash
-pytest tests/test_security.py -v
+pytest test/test_security.py -v
 ```
 
 ---
