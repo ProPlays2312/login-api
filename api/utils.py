@@ -19,3 +19,10 @@ def is_email(email):
             raise Exception("Malformed email")
     except Exception as e:
         return f"Error: {e}"
+
+
+def safe_print(*args, **kwargs):
+    try:
+        print(*args, **kwargs)
+    except Exception:
+        pass

@@ -160,6 +160,7 @@ def test_verify_otp_invalid_or_expired(monkeypatch):
 
 def test_mailer_missing_credentials(monkeypatch):
     from api.mailer import send_otp_email
+    monkeypatch.delenv("PLUNK_API_KEY", raising=False)
     monkeypatch.delenv("RESEND_API_KEY", raising=False)
     monkeypatch.delenv("GMAIL_USER", raising=False)
     monkeypatch.delenv("GMAIL_APP_PASSWORD", raising=False)
@@ -170,16 +171,11 @@ def test_mailer_missing_credentials(monkeypatch):
     assert "not configured" in err
 
 
-def test_mailer_resend_mocked_success(monkeypatch):
-    import io
+def test_mailer_plunk_mocked_success(monkeypatch):
     import urllib.request
     from api.mailer import send_otp_email
 
-    monkeypatch.setenv("RESEND_API_KEY", "re_test_mock_key_123")
-    monkeypatch.delenv("GMAIL_USER", raising=False)
-    monkeypatch.delenv("GMAIL_APP_PASSWORD", raising=False)
-    monkeypatch.delenv("SMTP_EMAIL", raising=False)
-    monkeypatch.delenv("SMTP_APP_PASSWORD", raising=False)
+    monkeypatch.setenv("PLUNK_API_KEY", "sk_test_mock_plunk_key")
 
     class MockHTTPResponse:
         def __init__(self):
@@ -192,7 +188,7 @@ def test_mailer_resend_mocked_success(monkeypatch):
             pass
 
         def read(self):
-            return b'{"id": "mock-email-id-123"}'
+            return b'{"success": true}'
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=10: MockHTTPResponse())
 
@@ -201,77 +197,23 @@ def test_mailer_resend_mocked_success(monkeypatch):
     assert err is None
 
 
-def test_mailer_smtp_mocked_success(monkeypatch):
-    import smtplib
+def test_mailer_plunk_http_error(monkeypatch):
+    import io
+    import urllib.request
+    import urllib.error
     from api.mailer import send_otp_email
 
-    monkeypatch.setenv("GMAIL_USER", "vault@gmail.com")
-    monkeypatch.setenv("GMAIL_APP_PASSWORD", "mockapppassword16")
+    monkeypatch.setenv("PLUNK_API_KEY", "sk_test_mock_plunk_key")
 
-    class MockSMTP:
-        def __init__(self, host, port, timeout=10):
-            pass
+    def mock_urlopen(req, timeout=10):
+        fp = io.BytesIO(b'{"message": "Invalid API key"}')
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, fp)
 
-        def __enter__(self):
-            return self
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
 
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            pass
-
-        def ehlo(self):
-            pass
-
-        def starttls(self):
-            pass
-
-        def login(self, user, pwd):
-            pass
-
-        def send_message(self, msg):
-            pass
-
-    monkeypatch.setattr(smtplib, "SMTP", MockSMTP)
-    success, err = send_otp_email("recipient@example.com", "888999", "Recipient")
-    assert success is True
-    assert err is None
-
-
-def test_mailer_smtp_email_env_success(monkeypatch):
-    import smtplib
-    from api.mailer import send_otp_email
-
-    monkeypatch.delenv("GMAIL_USER", raising=False)
-    monkeypatch.delenv("GMAIL_APP_PASSWORD", raising=False)
-    monkeypatch.setenv("SMTP_EMAIL", "vault-smtp@gmail.com")
-    monkeypatch.setenv("SMTP_APP_PASSWORD", "smtpappsecret1234")
-
-    class MockSMTP:
-        def __init__(self, host, port, timeout=10):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            pass
-
-        def ehlo(self):
-            pass
-
-        def starttls(self):
-            pass
-
-        def login(self, user, pwd):
-            assert user == "vault-smtp@gmail.com"
-            assert pwd == "smtpappsecret1234"
-
-        def send_message(self, msg):
-            pass
-
-    monkeypatch.setattr(smtplib, "SMTP", MockSMTP)
-    success, err = send_otp_email("recipient@example.com", "112233")
-    assert success is True
-    assert err is None
+    success, err = send_otp_email("recipient@example.com", "998877")
+    assert success is False
+    assert "Invalid API key" in err
 
 
 def test_create_otp_account_deactivated(monkeypatch):
