@@ -1,9 +1,11 @@
 def send_otp_email(to_email, otp_code, username=None):
-    """Send an OTP email using Plunk as the dedicated email delivery service.
+    """Send an OTP email using SMTP (Gmail, Outlook, custom) or Plunk email delivery.
 
     Reads configuration from environment variables:
-    - ``PLUNK_API_KEY``: Secret key for authenticating with Plunk's API.
-    - ``PLUNK_FROM``: Sender address (e.g., ``Vault Auth <no-reply@vaultauthsso.proplays2312.eu.org>``).
+    - ``SMTP_EMAIL`` / ``SMTP_PASSWORD``: Direct SMTP credentials (e.g., Gmail App Password).
+    - ``SMTP_HOST`` / ``SMTP_PORT``: SMTP host (default: ``smtp.gmail.com``) and port (default: ``587``).
+    - ``PLUNK_API_KEY``: API key for Plunk email delivery service.
+    - ``PLUNK_FROM``: Sender address for Plunk (e.g., ``Vault Auth <no-reply@vaultauthsso.proplays2312.eu.org>``).
 
     Returns:
         tuple[bool, Optional[str]]: (True, None) on success, or (False, error_message) on failure.
@@ -16,14 +18,12 @@ def send_otp_email(to_email, otp_code, username=None):
     import urllib.error
     from api.utils import safe_print
 
+    smtp_user = os.getenv("SMTP_EMAIL") or os.getenv("SMTP_USER") or os.getenv("GMAIL_USER")
+    smtp_pass = os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_APP_PASSWORD") or os.getenv("SMTP_PASS") or os.getenv("GMAIL_APP_PASSWORD")
     plunk_key = os.getenv("PLUNK_API_KEY")
-    if not plunk_key or not plunk_key.strip():
-        return False, "Email delivery not configured. Add PLUNK_API_KEY to .env."
 
-    plunk_from = os.getenv("PLUNK_FROM", "Vault Auth <no-reply@vaultauthsso.proplays2312.eu.org>")
-    sender_name, sender_addr = email.utils.parseaddr(plunk_from)
-    sender_addr = sender_addr.strip() if sender_addr else plunk_from.strip()
-    sender_name = sender_name.strip() if sender_name else "Vault Auth"
+    if not (smtp_user and smtp_pass) and not (plunk_key and plunk_key.strip()):
+        return False, "Email delivery not configured. Add SMTP_EMAIL + SMTP_PASSWORD or PLUNK_API_KEY to .env."
 
     raw_display = username or to_email
     display_name = html.escape(str(raw_display))
@@ -68,6 +68,45 @@ def send_otp_email(to_email, otp_code, username=None):
 </html>
 """
 
+    # 1. SMTP Delivery (if SMTP credentials are provided)
+    if smtp_user and smtp_pass:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.getenv("SMTP_PORT", "587") or 587)
+        from_header = os.getenv("SMTP_FROM", f"Vault Auth <{smtp_user}>")
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = from_header
+        msg["To"] = to_email
+
+        text_content = f"Vault Auth - Verification Code\n\nHello {raw_display},\n\nYour login verification code is: {otp_code}\n\nThis code is valid for 5 minutes.\nIf you did not request this, please ignore this email."
+        msg.attach(MIMEText(text_content, "plain"))
+        msg.attach(MIMEText(html_content, "html"))
+
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+            safe_print(f"[SMTP Success] OTP email sent to {to_email}")
+            return True, None
+        except Exception as e:
+            safe_print(f"[SMTP Error] {e}")
+            if not plunk_key:
+                return False, f"SMTP delivery failed: {e}"
+
+    # 2. Plunk API Delivery (fallback or primary when PLUNK_API_KEY is set)
+    plunk_from = os.getenv("PLUNK_FROM", "Vault Auth <no-reply@vaultauthsso.proplays2312.eu.org>")
+    sender_name, sender_addr = email.utils.parseaddr(plunk_from)
+    sender_addr = sender_addr.strip() if sender_addr else plunk_from.strip()
+    sender_name = sender_name.strip() if sender_name else "Vault Auth"
+
     payload = {
         "to": to_email,
         "subject": subject,
@@ -108,7 +147,7 @@ def send_otp_email(to_email, otp_code, username=None):
 
 
 def send_password_reset_email(to_email, reset_code_or_link, username=None):
-    """Send a password reset instructions email using Plunk."""
+    """Send a password reset instructions email using SMTP or Plunk."""
     import os
     import json
     import html
@@ -117,14 +156,12 @@ def send_password_reset_email(to_email, reset_code_or_link, username=None):
     import urllib.error
     from api.utils import safe_print
 
+    smtp_user = os.getenv("SMTP_EMAIL") or os.getenv("SMTP_USER") or os.getenv("GMAIL_USER")
+    smtp_pass = os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_APP_PASSWORD") or os.getenv("SMTP_PASS") or os.getenv("GMAIL_APP_PASSWORD")
     plunk_key = os.getenv("PLUNK_API_KEY")
-    if not plunk_key or not plunk_key.strip():
-        return False, "Email delivery not configured. Add PLUNK_API_KEY to .env."
 
-    plunk_from = os.getenv("PLUNK_FROM", "Vault Auth <no-reply@vaultauthsso.proplays2312.eu.org>")
-    sender_name, sender_addr = email.utils.parseaddr(plunk_from)
-    sender_addr = sender_addr.strip() if sender_addr else plunk_from.strip()
-    sender_name = sender_name.strip() if sender_name else "Vault Auth"
+    if not (smtp_user and smtp_pass) and not (plunk_key and plunk_key.strip()):
+        return False, "Email delivery not configured. Add SMTP_EMAIL + SMTP_PASSWORD or PLUNK_API_KEY to .env."
 
     raw_display = username or to_email
     display_name = html.escape(str(raw_display))
@@ -168,6 +205,45 @@ def send_password_reset_email(to_email, reset_code_or_link, username=None):
 </body>
 </html>
 """
+
+    # 1. SMTP Delivery
+    if smtp_user and smtp_pass:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.getenv("SMTP_PORT", "587") or 587)
+        from_header = os.getenv("SMTP_FROM", f"Vault Auth <{smtp_user}>")
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = from_header
+        msg["To"] = to_email
+
+        text_content = f"Vault Auth - Password Reset\n\nHello {raw_display},\n\nYour password reset code is: {reset_code_or_link}\nValid for 15 minutes."
+        msg.attach(MIMEText(text_content, "plain"))
+        msg.attach(MIMEText(html_content, "html"))
+
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+            safe_print(f"[SMTP Success] Password reset email sent to {to_email}")
+            return True, None
+        except Exception as e:
+            safe_print(f"[SMTP Error] {e}")
+            if not plunk_key:
+                return False, f"SMTP delivery failed: {e}"
+
+    # 2. Plunk Delivery
+    plunk_from = os.getenv("PLUNK_FROM", "Vault Auth <no-reply@vaultauthsso.proplays2312.eu.org>")
+    sender_name, sender_addr = email.utils.parseaddr(plunk_from)
+    sender_addr = sender_addr.strip() if sender_addr else plunk_from.strip()
+    sender_name = sender_name.strip() if sender_name else "Vault Auth"
 
     payload = {
         "to": to_email,
